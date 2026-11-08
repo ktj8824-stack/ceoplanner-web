@@ -76,7 +76,7 @@ const Sec = {
       <div class="side-sec grow"><div class="side-title">분류</div>
         <div class="side-list">
           ${item('all', '전체 일정', '앞으로 30일', upcoming.length, Icon.svg('grid', 16))}
-          ${cats.map(([k, c]) => item(k, c.label, k === 'golf' ? '티오프 1시간 전 도착' : k === 'trip' ? 'KTX · 항공' : '앞으로 30일', upcoming.filter(s => s.category === k).length, Icon.cat(k, 16))).join('')}
+          ${cats.map(([k, c]) => item(k, c.label, k === 'golf' ? '티오프 1시간 전 도착' : k === 'trip' ? 'KTX · 항공' : '', upcoming.filter(s => s.category === k).length, Icon.cat(k, 16))).join('')}
         </div></div>
       <div class="side-foot">
         <a class="side-btn" href="${U.esc(CEOP_CONFIG.APP_URL)}" target="_blank">${Icon.svg('phone', 16)} CEO 앱 열기</a>
@@ -182,7 +182,7 @@ const Sec = {
   pill(s) {
     if (s.masked) return `<div class="ev masked"><span class="num">${s.start}</span>${Icon.svg('lock', 12)} 바쁨</div>`;
     return `<button class="ev cat-${s.category} ${s.ackAt ? '' : 'unacked'}" data-open="${s.id}" title="${U.esc(s.title)}">
-      <span class="num">${s.start}</span><span class="ev-t">${U.esc(s.title)}</span>${s.ackAt ? '' : '<i class="dot" title="대표 미확인"></i>'}</button>`;
+      <span class="num">${s.start}</span><span class="ev-t">${U.esc(s.title)}</span>${s.ackAt ? '' : '<i class="dot" title="대표 확인 대기"></i>'}</button>`;
   },
 
   monthView() {
@@ -246,7 +246,7 @@ const Sec = {
         <div class="g-label">${s.masked ? `<span class="num">${s.start}–${s.end}</span><b class="masked-t">${Icon.svg('lock', 14)} 대표 개인 일정</b>`
           : `<span class="num">${s.start}–${s.end}</span><button class="g-title" data-open="${s.id}">${Icon.cat(s.category, 15)} ${U.esc(s.title)}</button>
              <span class="muted small">${U.esc(s.location || '')}${go ? ` · ${Backtime.MODES[s.mode].label}` : ''}</span>
-             ${s.ackAt ? '<span class="badge ok">대표 확인</span>' : '<span class="badge warn">미확인</span>'}`}</div>
+             ${s.ackAt ? '<span class="badge ok">확인함</span>' : '<span class="badge warn">확인 대기</span>'}`}</div>
         <div class="g-track">${bars}</div>
         ${steps ? `<ol class="g-steps">${steps}</ol>` : ''}</div>`;
     }).join('');
@@ -402,12 +402,13 @@ const Sec = {
     const keep = d.querySelector('input')?.value || '';
     d.innerHTML = `<div class="dr-head"><div><b>비서톡</b><small>${U.esc(Store.profile().name || '대표')}님과 대화</small></div>
         <button class="icon-btn" data-x aria-label="닫기">${Icon.svg('x', 18)}</button></div>
-      <div class="dr-msgs" id="drMsgs">${msgs.map(m => `<div class="m ${m.from === 'secretary' ? 'me' : 'them'} ${m.urgent ? 'urgent' : ''}">${m.urgent ? '<b>긴급</b> ' : ''}${U.esc(m.body)}<small class="num">${m.from === 'ceo' ? '대표' : '나'} · ${U.hm(new Date(m.at))}</small></div>`).join('') || '<p class="muted small">대표님 요청이 여기에 표시돼요.</p>'}</div>
+      <div class="dr-msgs" id="drMsgs">${msgs.map(m => `<div class="m ${m.from === 'secretary' ? 'me' : 'them'} ${m.urgent ? 'urgent' : ''}">${m.urgent ? '<b>긴급</b> ' : ''}${U.esc(m.body)}${m.ref && m.from === 'ceo' && Store.get(m.ref) && !Store.get(m.ref).masked ? `<br><button class="ref" data-ref="${U.esc(m.ref)}">${Icon.svg('calendar', 13)} 일정 열기</button>` : ''}<small class="num">${m.from === 'ceo' ? '대표' : '나'} · ${U.hm(new Date(m.at))}</small></div>`).join('') || '<p class="muted small">대표님 요청이 여기에 표시돼요.</p>'}</div>
       <form class="dr-send" id="drSend"><input name="body" placeholder="대표님께 보낼 메시지" autocomplete="off"><button class="btn primary" aria-label="보내기">${Icon.svg('send', 16)}</button></form>`;
     const box = d.querySelector('#drMsgs'); box.scrollTop = box.scrollHeight;
     const form = d.querySelector('#drSend');
     form.body.value = keep;
     d.querySelector('[data-x]').addEventListener('click', () => this.toggleChat(false));
+    d.querySelectorAll('[data-ref]').forEach(b => b.addEventListener('click', () => this.openEditor({ id: b.dataset.ref })));
     form.addEventListener('submit', async e => {
       e.preventDefault();
       const v = form.body.value.trim(); if (!v) return;
