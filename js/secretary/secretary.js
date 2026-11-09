@@ -95,6 +95,7 @@ const Sec = {
         </div></div>
       <div class="side-foot">
         <a class="side-btn" href="${U.esc(CEOP_CONFIG.APP_URL)}" target="_blank">${Icon.svg('phone', 16)} CEO 앱 열기</a>
+        <a class="side-btn dim" href="privacy.html" target="_blank">개인정보 처리방침</a>
         ${Store.mode === 'demo' ? `<button class="side-btn dim" data-reset>데모 데이터 초기화</button>` : `<button class="side-btn dim" data-logout>로그아웃</button>`}
       </div>`;
     el.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => { this.filter = b.dataset.filter; this.refresh(); }));
