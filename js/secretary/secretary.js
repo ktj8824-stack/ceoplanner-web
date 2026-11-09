@@ -95,12 +95,73 @@ const Sec = {
         </div></div>
       <div class="side-foot">
         <a class="side-btn" href="${U.esc(CEOP_CONFIG.APP_URL)}" target="_blank">${Icon.svg('phone', 16)} CEO 앱 열기</a>
+        <button class="side-btn" data-accounts>${Icon.svg('user', 16)} 계정 관리</button>
         <a class="side-btn dim" href="privacy.html" target="_blank">개인정보 처리방침</a>
         ${Store.mode === 'demo' ? `<button class="side-btn dim" data-reset>데모 데이터 초기화</button>` : `<button class="side-btn dim" data-logout>로그아웃</button>`}
       </div>`;
     el.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => { this.filter = b.dataset.filter; this.refresh(); }));
     el.querySelector('[data-reset]')?.addEventListener('click', () => { if (confirm('데모 데이터를 처음 상태로 되돌릴까요?')) Store.resetDemo(); });
     el.querySelector('[data-logout]')?.addEventListener('click', () => Store.signOut());
+    el.querySelector('[data-accounts]').addEventListener('click', () => this.openAccounts());
+  },
+
+  // ───────── 계정 관리 (기사 · 비서 아이디 만들기, 비밀번호 재설정, 삭제) ─────────
+  ROLE_LABEL: { ceo: '대표', secretary: '비서', driver: '기사' },
+  openAccounts() {
+    const back = document.createElement('div');
+    back.className = 'modal-back';
+    const paint = (msg = '') => {
+      const list = Store.members();
+      back.innerHTML = `<div class="modal accounts" role="dialog" aria-label="계정 관리">
+        <div class="ed-head"><div><h3>계정 관리</h3><p class="muted small">우리 회사 계정 ${list.length}개 · 기사님 · 비서님 아이디를 여기서 만들어요</p></div>
+          <button class="icon-btn" data-close aria-label="닫기">${Icon.svg('x', 18)}</button></div>
+        <div class="ac-body">
+          <ul class="ac-list">${list.map(m => `<li>
+            <span class="ac-role r-${m.role}">${this.ROLE_LABEL[m.role]}</span>
+            <span class="ac-who"><b>${U.esc(m.name)}</b><small>아이디 ${U.esc(m.loginId)}${m.phone ? ' · ' + U.esc(m.phone) : ''}</small></span>
+            <span class="ac-act"><button class="btn sm" data-pw="${U.esc(m.loginId)}">비밀번호 재설정</button>
+              ${m.role !== 'ceo' && m.loginId !== Store.myLogin ? `<button class="btn sm quiet" data-del="${U.esc(m.loginId)}" aria-label="${U.esc(m.name)} 계정 삭제">삭제</button>` : ''}</span>
+          </li>`).join('')}</ul>
+          <form class="ac-add" id="acAdd">
+            <b>새 계정 만들기</b>
+            <div class="ac-grid">
+              <label>역할<select name="role"><option value="driver">기사</option><option value="secretary">비서</option></select></label>
+              <label>이름<input name="name" required autocomplete="off"></label>
+              <label>아이디<input name="loginId" required autocapitalize="none" spellcheck="false" placeholder="영어·숫자 3~30자" autocomplete="off"></label>
+              <label>임시 비밀번호<input name="password" required minlength="8" placeholder="8자 이상" autocomplete="off"></label>
+              <label><span>휴대폰 <span class="muted">(선택)</span></span><input name="phone" type="tel" placeholder="010-0000-0000" autocomplete="off"></label>
+            </div>
+            <div class="ac-foot"><span class="small ac-msg" role="status">${msg}</span><button class="btn primary" type="submit">계정 만들기</button></div>
+          </form>
+        </div></div>`;
+      const add = back.querySelector('#acAdd'), out = back.querySelector('.ac-msg');
+      const fail = x => { out.className = 'small ac-msg bad'; out.textContent = x.message || String(x); };
+      add.addEventListener('submit', async e => {
+        e.preventDefault();
+        const v = Object.fromEntries(new FormData(add));
+        const btn = add.querySelector('[type=submit]'); btn.disabled = true;
+        try {
+          await Store.account('add_member', v);
+          paint(`${this.ROLE_LABEL[v.role]} 계정을 만들었어요. 아이디 <b>${U.esc(v.loginId.trim().toLowerCase())}</b> · 임시 비밀번호 <b>${U.esc(v.password)}</b> 를 전해 주세요.`);
+        } catch (x) { fail(x); btn.disabled = false; }
+      });
+      back.querySelectorAll('[data-pw]').forEach(b => b.addEventListener('click', async () => {
+        const id = b.dataset.pw;
+        const pw = prompt(`${id} 의 새 임시 비밀번호 (8자 이상)`);
+        if (pw == null) return;
+        try { await Store.account('reset_password', { loginId: id, password: pw }); paint(`<b>${U.esc(id)}</b> 비밀번호를 바꿨어요. 새 비밀번호를 전해 주세요.`); }
+        catch (x) { fail(x); }
+      }));
+      back.querySelectorAll('[data-del]').forEach(b => b.addEventListener('click', async () => {
+        const id = b.dataset.del;
+        if (!confirm(`${id} 계정을 지울까요? 이 사람은 더 이상 로그인할 수 없어요.`)) return;
+        try { await Store.account('remove_member', { loginId: id }); paint(`<b>${U.esc(id)}</b> 계정을 지웠어요.`); }
+        catch (x) { fail(x); }
+      }));
+    };
+    paint();
+    back.addEventListener('click', e => { if (e.target === back || e.target.closest('[data-close]')) back.remove(); });
+    document.body.appendChild(back);
   },
 
   // ───────── 헤더 ─────────
