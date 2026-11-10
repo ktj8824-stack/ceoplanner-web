@@ -128,22 +128,24 @@ const Sec = {
     const back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML = `<div class="modal accounts billing" role="dialog" aria-label="구독 · 결제">
-      <div class="ed-head"><div><h3>구독 · 결제</h3><p class="muted small">결제 1번에 1개월 · 자동으로 다시 결제되지 않아요</p></div>
+      <div class="ed-head"><div><h3>구독 · 결제</h3><p class="muted small">매달 자동결제 · 언제든 해지 · 이용 중 늘리면 일할, 줄이면 다음 결제일부터</p></div>
         <button class="icon-btn" data-close aria-label="닫기">${Icon.svg('x', 18)}</button></div>
       <div class="ac-body">
         <div class="bill-now r-${s.plan}"><span><small>지금 요금제</small><b>${Plan.NAMES[s.plan]}</b></span>
-          <span><small>${s.plan === 'expired' ? '상태' : '이용 기간'}</small><b>${s.until ? `${Plan.untilText(s.until)}까지 · ${s.daysLeft}일 남음` : '결제가 필요해요'}</b></span>
+          <span><small>${s.plan === 'expired' ? '상태' : s.plan === 'trial' ? '무료 체험' : '다음 결제일'}</small><b>${s.until ? (s.plan === 'trial' ? `${Plan.untilText(s.until)}까지 · ${s.daysLeft}일 남음` : `${Plan.md(s.until)} · 매달 ${Plan.won(Plan.charge(s.plan, s.extraExecs).total)}`) : '결제가 필요해요'}</b></span>
           <span><small>AI 비서</small><b>${s.ai ? '사용 중' : '쓸 수 없음'}</b></span></div>
         <div class="bill-plans">
           ${['basic', 'premium'].map(k => `<div class="bill-plan${s.plan === k ? ' on' : ''}"><b>${Plan.NAMES[k]}</b><span class="pr">${Plan.won(P[k])}<small> / 월 · VAT 별도</small></span>
             <ul>${Plan.FEATURES[k].map(f => `<li>${U.esc(f)}</li>`).join('')}</ul></div>`).join('')}
         </div>
         <p class="muted small" style="margin:0">가격은 VAT 별도 (결제 시 부가세 10% 추가) · 추가 임원 1명당 월 ${Plan.won(P.perExec)} · 비서 · 기사 계정은 무료${s.extraExecs ? ` · 지금 추가 임원 ${s.extraExecs}명` : ''}</p>
-        <div class="ac-foot"><span class="small muted">${s.active && s.plan !== 'trial' ? '지금 결제하면 끝나는 날 뒤로 1개월 이어져요.' : '결제한 날부터 1개월이에요.'}</span>
-          <a class="btn primary" href="${U.esc(Plan.payUrl())}">${s.plan === 'trial' || s.plan === 'expired' ? '결제하기' : '연장 · 요금제 바꾸기'}</a></div>
+        ${(() => { const c = Store.company() || {}; const np = c.nextPlan || (c.nextExtraExecs != null ? c.plan : null);
+          return s.active && s.plan !== 'trial' && np ? `<p class="small" style="margin:0; background:var(--brass-soft); border-radius:10px; padding:8px 12px;">${Plan.md(s.until)}부터 ${U.esc(Plan.NAMES[np])}${(c.nextExtraExecs ?? c.extraExecs) ? ` + 임원 ${c.nextExtraExecs ?? c.extraExecs}명` : ''}(으)로 바뀌어요 (예약됨)</p>` : ''; })()}
+        <div class="ac-foot"><span class="small muted">${s.active && s.plan !== 'trial' ? '늘리면 남은 날만큼 일할 결제, 줄이면 다음 결제일부터 적용돼요.' : '결제한 날부터 매달 같은 날 자동결제돼요.'}</span>
+          <a class="btn primary" href="${U.esc(Plan.payUrl())}">${s.plan === 'trial' || s.plan === 'expired' ? '결제하기' : '요금제 · 임원 바꾸기'}</a></div>
         <div><b class="small">결제 내역</b>
           ${hist.length ? `<ul class="ac-list bill-hist">${hist.map(h => `<li><span class="ac-role">${h.mode === 'live' ? '결제' : h.mode === 'demo' ? '데모' : '테스트'}</span>
-            <span class="ac-who"><b>${Plan.NAMES[h.plan]}${h.extraExecs ? ` + 임원 ${h.extraExecs}명` : ''} · ${Plan.won(h.amount)}</b><small>${Plan.untilText(h.approvedAt)} 결제 · ${U.esc(h.method || '')} · ${Plan.untilText(h.periodEnd)}까지</small></span><span></span></li>`).join('')}</ul>`
+            <span class="ac-who"><b>${Plan.NAMES[h.plan]}${h.extraExecs ? ` + 임원 ${h.extraExecs}명` : ''} · ${Plan.won(h.amount)}</b><small>${Plan.untilText(h.approvedAt)} 결제${h.kind === 'prorate' ? ' (일할)' : ''} · ${U.esc(h.method || '')} · ${U.esc(h.orderId || '')}</small></span><span></span></li>`).join('')}</ul>`
             : '<p class="muted small" style="margin:6px 0 0">아직 결제 내역이 없어요.</p>'}</div>
       </div></div>`;
     back.addEventListener('click', e => { if (e.target === back || e.target.closest('[data-close]')) back.remove(); });
