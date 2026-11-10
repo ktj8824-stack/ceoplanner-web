@@ -135,10 +135,10 @@ const Sec = {
           <span><small>${s.plan === 'expired' ? '상태' : '이용 기간'}</small><b>${s.until ? `${Plan.untilText(s.until)}까지 · ${s.daysLeft}일 남음` : '결제가 필요해요'}</b></span>
           <span><small>AI 비서</small><b>${s.ai ? '사용 중' : '쓸 수 없음'}</b></span></div>
         <div class="bill-plans">
-          ${['basic', 'premium'].map(k => `<div class="bill-plan${s.plan === k ? ' on' : ''}"><b>${Plan.NAMES[k]}</b><span class="pr">${Plan.won(P[k])}<small> / 월</small></span>
+          ${['basic', 'premium'].map(k => `<div class="bill-plan${s.plan === k ? ' on' : ''}"><b>${Plan.NAMES[k]}</b><span class="pr">${Plan.won(P[k])}<small> / 월 · VAT 별도</small></span>
             <ul>${Plan.FEATURES[k].map(f => `<li>${U.esc(f)}</li>`).join('')}</ul></div>`).join('')}
         </div>
-        <p class="muted small" style="margin:0">추가 임원 1명당 월 ${Plan.won(P.perExec)} · 비서 · 기사 계정은 무료${s.extraExecs ? ` · 지금 추가 임원 ${s.extraExecs}명` : ''}</p>
+        <p class="muted small" style="margin:0">가격은 VAT 별도 (결제 시 부가세 10% 추가) · 추가 임원 1명당 월 ${Plan.won(P.perExec)} · 비서 · 기사 계정은 무료${s.extraExecs ? ` · 지금 추가 임원 ${s.extraExecs}명` : ''}</p>
         <div class="ac-foot"><span class="small muted">${s.active && s.plan !== 'trial' ? '지금 결제하면 끝나는 날 뒤로 1개월 이어져요.' : '결제한 날부터 1개월이에요.'}</span>
           <a class="btn primary" href="${U.esc(Plan.payUrl())}">${s.plan === 'trial' || s.plan === 'expired' ? '결제하기' : '연장 · 요금제 바꾸기'}</a></div>
         <div><b class="small">결제 내역</b>
