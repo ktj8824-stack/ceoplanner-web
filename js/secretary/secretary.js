@@ -35,18 +35,21 @@ const Sec = {
         <aside class="side" id="side"></aside>
         <main class="main">
           <header class="main-head" id="head"></header>
+          <div id="planbar"></div>
           <div id="urgent"></div>
           <section class="panel" id="stats"></section>
           <section class="panel cal" id="cal"></section>
         </main>
       </div>
-      <aside class="drawer" id="drawer" aria-hidden="true"></aside>`;
+      <aside class="drawer" id="drawer" aria-hidden="true"></aside>
+      <div class="plan-lock-back" id="planlock" hidden></div>`;
     Store.on(() => this.refresh());
     setInterval(() => { this.renderStats(); if (this.view === 'day') this.renderCal(); }, 60000);
     this.refresh();
   },
 
   refresh() {
+    this.renderPlan();
     this.renderSide();
     this.renderHead();
     this.renderUrgent();
@@ -96,6 +99,7 @@ const Sec = {
       <div class="side-foot">
         <a class="side-btn" href="${U.esc(CEOP_CONFIG.APP_URL)}" target="_blank">${Icon.svg('phone', 16)} CEO 앱 열기</a>
         <button class="side-btn" data-accounts>${Icon.svg('user', 16)} 계정 관리</button>
+        <button class="side-btn" data-billing>${Icon.svg('file', 16)} 구독 · 결제<small class="side-sub">${U.esc(Plan.summary())}</small></button>
         <a class="side-btn dim" href="privacy.html" target="_blank">개인정보 처리방침</a>
         ${Store.mode === 'demo' ? `<button class="side-btn dim" data-reset>데모 데이터 초기화</button>` : `<button class="side-btn dim" data-logout>로그아웃</button>`}
       </div>`;
@@ -103,6 +107,47 @@ const Sec = {
     el.querySelector('[data-reset]')?.addEventListener('click', () => { if (confirm('데모 데이터를 처음 상태로 되돌릴까요?')) Store.resetDemo(); });
     el.querySelector('[data-logout]')?.addEventListener('click', () => Store.signOut());
     el.querySelector('[data-accounts]').addEventListener('click', () => this.openAccounts());
+    el.querySelector('[data-billing]').addEventListener('click', () => this.openBilling());
+  },
+
+  // ───────── 구독 (끝나면 화면 전체 안내, 얼마 안 남으면 위에 알림 줄) ─────────
+  renderPlan() {
+    const s = Plan.state();
+    const lock = document.getElementById('planlock');
+    lock.hidden = s.active;
+    if (!s.active) { lock.innerHTML = Plan.lockHtml(); Plan.bindLock(lock); }
+    const bar = document.getElementById('planbar');
+    const soon = s.active && ((s.plan === 'trial' && s.daysLeft <= 3) || (s.plan !== 'trial' && s.daysLeft <= 5));
+    bar.innerHTML = soon ? `<div class="plan-bar">${Icon.svg('bell', 18)}<span>${s.plan === 'trial' ? `무료 체험이 <b>${s.daysLeft}일</b> 남았어요.` : `이용 기간이 <b>${s.daysLeft}일</b> 남았어요 (${Plan.untilText(s.until)}까지).`} 끊기지 않게 미리 결제해 주세요.</span>
+      <a class="btn sm primary" href="${U.esc(Plan.payUrl())}">결제하기</a></div>` : '';
+  },
+
+  openBilling() {
+    const s = Plan.state(), P = Plan.PRICES;
+    const hist = Store.payments().filter(p => p.status === 'DONE');
+    const back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML = `<div class="modal accounts billing" role="dialog" aria-label="구독 · 결제">
+      <div class="ed-head"><div><h3>구독 · 결제</h3><p class="muted small">결제 1번에 1개월 · 자동으로 다시 결제되지 않아요</p></div>
+        <button class="icon-btn" data-close aria-label="닫기">${Icon.svg('x', 18)}</button></div>
+      <div class="ac-body">
+        <div class="bill-now r-${s.plan}"><span><small>지금 요금제</small><b>${Plan.NAMES[s.plan]}</b></span>
+          <span><small>${s.plan === 'expired' ? '상태' : '이용 기간'}</small><b>${s.until ? `${Plan.untilText(s.until)}까지 · ${s.daysLeft}일 남음` : '결제가 필요해요'}</b></span>
+          <span><small>AI 비서</small><b>${s.ai ? '사용 중' : '쓸 수 없음'}</b></span></div>
+        <div class="bill-plans">
+          ${['basic', 'premium'].map(k => `<div class="bill-plan${s.plan === k ? ' on' : ''}"><b>${Plan.NAMES[k]}</b><span class="pr">${Plan.won(P[k])}<small> / 월</small></span>
+            <ul>${Plan.FEATURES[k].map(f => `<li>${U.esc(f)}</li>`).join('')}</ul></div>`).join('')}
+        </div>
+        <p class="muted small" style="margin:0">추가 임원 1명당 월 ${Plan.won(P.perExec)} · 비서 · 기사 계정은 무료${s.extraExecs ? ` · 지금 추가 임원 ${s.extraExecs}명` : ''}</p>
+        <div class="ac-foot"><span class="small muted">${s.active && s.plan !== 'trial' ? '지금 결제하면 끝나는 날 뒤로 1개월 이어져요.' : '결제한 날부터 1개월이에요.'}</span>
+          <a class="btn primary" href="${U.esc(Plan.payUrl())}">${s.plan === 'trial' || s.plan === 'expired' ? '결제하기' : '연장 · 요금제 바꾸기'}</a></div>
+        <div><b class="small">결제 내역</b>
+          ${hist.length ? `<ul class="ac-list bill-hist">${hist.map(h => `<li><span class="ac-role">${h.mode === 'live' ? '결제' : h.mode === 'demo' ? '데모' : '테스트'}</span>
+            <span class="ac-who"><b>${Plan.NAMES[h.plan]}${h.extraExecs ? ` + 임원 ${h.extraExecs}명` : ''} · ${Plan.won(h.amount)}</b><small>${Plan.untilText(h.approvedAt)} 결제 · ${U.esc(h.method || '')} · ${Plan.untilText(h.periodEnd)}까지</small></span><span></span></li>`).join('')}</ul>`
+            : '<p class="muted small" style="margin:6px 0 0">아직 결제 내역이 없어요.</p>'}</div>
+      </div></div>`;
+    back.addEventListener('click', e => { if (e.target === back || e.target.closest('[data-close]')) back.remove(); });
+    document.body.appendChild(back);
   },
 
   // ───────── 계정 관리 (기사 · 비서 아이디 만들기, 비밀번호 재설정, 삭제) ─────────
