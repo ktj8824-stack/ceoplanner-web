@@ -30,7 +30,7 @@ const Sec = {
     this.seenUrgent = Number(localStorage.getItem('CEOP_SEEN_SEC_URGENT') || 0);
     const root = document.getElementById('root');
     root.innerHTML = `
-      ${Store.mode === 'demo' ? `<div class="demo-bar">데모 모드입니다. 같은 브라우저에서 <a href="${U.esc(CEOP_CONFIG.APP_URL)}" target="_blank">CEO 앱</a>을 열면 양쪽에 바로 반영돼요.</div>` : ''}
+      ${Store.mode === 'demo' ? `<div class="demo-bar">데모 모드예요. 같은 브라우저에서 <a href="${U.esc(CEOP_CONFIG.APP_URL)}" target="_blank">대표 앱</a>을 열면 양쪽에 바로 반영돼요.${Store.forcedDemo ? ' · <button data-exitdemo>데모 끝내기</button>' : ''}</div>` : ''}
       <div class="shell">
         <aside class="side" id="side"></aside>
         <main class="main">
@@ -107,6 +107,7 @@ const Sec = {
     el.querySelector('[data-reset]')?.addEventListener('click', () => { if (confirm('데모 데이터를 처음 상태로 되돌릴까요?')) Store.resetDemo(); });
     el.querySelector('[data-logout]')?.addEventListener('click', () => Store.signOut());
     el.querySelector('[data-accounts]').addEventListener('click', () => this.openAccounts());
+    document.querySelector('[data-exitdemo]')?.addEventListener('click', () => Store.exitDemo());
     el.querySelector('[data-billing]').addEventListener('click', () => this.openBilling());
   },
 
