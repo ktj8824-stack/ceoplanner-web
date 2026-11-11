@@ -304,6 +304,11 @@ const Sec = {
     el.querySelectorAll('[data-open]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); this.openEditor({ id: b.dataset.open }); }));
     el.querySelectorAll('[data-newon]').forEach(b => b.addEventListener('click', () => this.openEditor({ date: b.dataset.newon })));
     el.querySelectorAll('[data-dayof]').forEach(b => b.addEventListener('click', e => { e.stopPropagation(); this.cur = b.dataset.dayof; this.view = 'day'; this.renderCal(); }));
+    el.querySelectorAll('[data-seenadj]').forEach(b => b.addEventListener('click', async () => {
+      const t = Store.get(b.dataset.seenadj);
+      try { await Store.send(`'${t ? t.title : '일정'}' 조정 요청 확인했어요. 바로 조정할게요.`, { ref: b.dataset.seenadj }); U.toast('대표님께 확인했다고 알렸어요'); }
+      catch (err) { U.toast('보내지 못했어요: ' + (err.message || err)); }
+    }));
     el.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => this.shiftSchedule(b.dataset.shift, b.dataset.to)));
     el.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => this.nudge(b.dataset.nudge)));
     el.querySelectorAll('.ev.masked').forEach(b => b.addEventListener('click', e => e.stopPropagation()));
@@ -394,10 +399,13 @@ const Sec = {
     const warnHtml = warns.map(w => {
       const fix = this.fixFor(w);
       const canFix = !w.b.masked;
-      const asked = Store.messages().some(m => m.from === 'ceo' && m.ref === w.b.id && m.body.includes('조정'));
+      const msgs = Store.messages();
+      const req = [...msgs].reverse().find(m => m.from === 'ceo' && m.ref === w.b.id && m.body.includes('조정'));
+      const asked = !!req;
+      const seen = req && msgs.some(m => m.from === 'secretary' && m.ref === w.b.id && String(m.at) > String(req.at));
       return `<div class="fix">${Icon.svg('alert', 20)}<div><b>${U.esc(w.msg)}</b>
         <span>${asked ? '대표님이 앱에서 조정을 요청했어요 · ' : ''}${canFix ? `'${U.esc(w.b.title)}' 시작을 ${fix.to}${this.ro(fix.to)} ${fix.add}분 미루면 해결돼요` : '대표 개인 일정과 겹쳐요'}</span></div>
-        ${canFix ? `<button class="btn signal" data-shift="${w.b.id}" data-to="${fix.to}">${U.esc(w.b.title)} ${fix.to}${this.ro(fix.to)} 미루기</button>` : ''}</div>`;
+        ${asked && !seen ? `<button class="btn" data-seenadj="${w.b.id}">확인했어요</button>` : ''}${canFix ? `<button class="btn signal" data-shift="${w.b.id}" data-to="${fix.to}">${U.esc(w.b.title)} ${fix.to}${this.ro(fix.to)} 미루기</button>` : ''}</div>`;
     }).join('');
     return `${warnHtml}<div class="gantt"><div class="g-row g-head"><div class="g-label"></div>${scale}</div>${rows}</div>
       <p class="legend"><i class="g-move"></i> 기사 대기 · 이동 <i class="g-main cat-external"></i> 일정 ${this.cur === U.today() ? '<i class="g-now-key"></i> 지금' : ''}</p>`;
