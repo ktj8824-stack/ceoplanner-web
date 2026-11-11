@@ -63,7 +63,7 @@ const Sec = {
   day(ymd) { return this.visible(Store.byDate(ymd)).filter(s => s.status !== 'cancelled'); },
   newMsgs() { return Store.messages().slice(this.seenMsgs).filter(m => m.from === 'ceo').length; },
   pendingAll() { return Store.list().filter(s => !s.masked && !s.ackAt && s.status !== 'cancelled' && s.date >= U.today()).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)); },
-  conflictsOn(ymd) { return Backtime.conflicts(Store.byDate(ymd).filter(s => s.status !== 'cancelled')); },
+  conflictsOn(ymd) { return Backtime.conflictsOn(Store.list(), ymd); },
   dateShort(ymd) { const d = U.at(ymd, '00:00'); return `${d.getMonth() + 1}월 ${d.getDate()}일 (${U.WEEK[d.getDay()]})`; },
   whenLabel(s) {
     const rel = s.date === U.today() ? '오늘' : s.date === U.addDays(U.today(), 1) ? `내일 (${U.WEEK[U.at(s.date, '00:00').getDay()]})` : this.dateShort(s.date);
@@ -179,6 +179,7 @@ const Sec = {
               <label>임시 비밀번호<input name="password" required minlength="8" placeholder="8자 이상" autocomplete="off"></label>
               <label><span>휴대폰 <span class="muted">(선택)</span></span><input name="phone" type="tel" placeholder="010-0000-0000" autocomplete="off"></label>
             </div>
+            <p class="small muted" style="margin:0">기사님 앱 화면은 준비 중이에요. 지금은 '기사님께 배차 알림'으로 문자를 보내 주세요.</p>
             <div class="ac-foot"><span class="small ac-msg" role="status">${msg}</span><button class="btn primary" type="submit">계정 만들기</button></div>
           </form>
         </div></div>`;
@@ -368,7 +369,7 @@ const Sec = {
   dayView() {
     const list = this.day(this.cur);
     const plans = Backtime.planDay(list, { prepMin: Store.profile().prepMin });
-    const warns = Backtime.conflicts(list);
+    const warns = this.conflictsOn(this.cur);
     if (!plans.length) return `<div class="empty-big">${Icon.svg('calendar', 28)}<p>이 날은 일정이 없어요.</p><button class="btn primary" data-newon="${this.cur}">${Icon.svg('plus', 16)} 이 날 일정 등록</button></div>`;
     const now = new Date();
     const times = plans.flatMap(({ p }) => [p.wakeAt || p.driverCallAt || p.leaveAt, p.endAt]);
@@ -544,6 +545,11 @@ const Sec = {
     // 출발지 후보: 그날 앞 일정 장소 + 자주 쓰는 곳
     const places = [...new Set([...Store.list().filter(x => !x.masked && x.location).map(x => x.location), '본사', '자택'])];
     back.querySelector('#originList').innerHTML = places.map(pl => `<option value="${U.esc(pl)}">`).join('');
+    // 출발지를 직접 고치지 않았으면, 날짜·시작 시각이 바뀔 때 '그 전 일정 장소'로 다시 채움
+    let originTouched = !!(this.edit && this.edit.id);
+    f.elements.origin && f.elements.origin.addEventListener('input', () => { originTouched = true; });
+    const reOrigin = e => { if (!originTouched && f.elements.origin && ['date', 'start'].includes(e.target.name)) f.elements.origin.value = this.originFor(f.elements.date.value, f.elements.start.value, this.edit && this.edit.id); };
+    f.addEventListener('change', reOrigin);
     f.addEventListener('input', () => { this.dirty = true; this.syncForm(f, back); });
     f.addEventListener('change', () => this.syncForm(f, back));
     f.addEventListener('submit', async e => { e.preventDefault(); if (await this.save(f)) { this.dirty = false; this.edit = null; back.remove(); } });
@@ -557,11 +563,16 @@ const Sec = {
     f.title.focus();
   },
 
-  /** 새 일정 기본값 — 출발지는 그날 마지막 일정 장소, 없으면 본사 */
+  /** 출발지 기본값 — 이 일정 시작 전에 끝나는 마지막 일정 장소, 없으면 본사 */
+  originFor(d, start, exceptId) {
+    const prev = Store.byDate(d).filter(x => !x.masked && x.location && x.status !== 'cancelled' && x.id !== exceptId && (x.end || x.start) <= start && x.start <= start).pop();
+    return prev ? prev.location : '본사';
+  },
+
+  /** 새 일정 기본값 */
   blank(date) {
     const d = date || U.today();
-    const prev = Store.byDate(d).filter(x => !x.masked && x.location).pop();
-    return { title: '', category: 'external', date: d, start: '10:00', end: '11:00', location: '', origin: prev ? prev.location : '본사', mode: 'driver', travelMin: 30, bufferMin: 10, briefing: {}, trip: null, visibility: 'normal' };
+    return { title: '', category: 'external', date: d, start: '10:00', end: '11:00', location: '', origin: this.originFor(d, '10:00'), mode: 'driver', travelMin: 30, bufferMin: 10, briefing: {}, trip: null, visibility: 'normal' };
   },
 
   fromForm(f) {
@@ -572,7 +583,7 @@ const Sec = {
       ...(id ? Store.get(id) : {}),
       title: v('title').trim(), category: v('category') || 'external', date: v('date'), start: v('start'), end: v('end'),
       location: v('location').trim(), origin: v('origin').trim(), mode, travelMin: Number(v('travelMin')) || 0, bufferMin: Number(v('bufferMin')) || 0,
-      visibility: 'normal', status: 'scheduled',
+      visibility: 'normal', status: (id && Store.get(id) && Store.get(id).status) || 'scheduled',
       briefing: { who: v('who').trim(), company: v('company').trim(), purpose: v('purpose').trim(), last: v('last').trim(), notes: v('notes').trim(), bring: v('bring').trim() },
       trip: Backtime.isTrip(mode) ? { station: v('station').trim(), departTime: v('departTime'), arriveTime: v('arriveTime'), accessMin: Number(v('accessMin')) || 0, accessMode: v('accessMode'), intl: !!v('intl') } : null,
     };
@@ -595,11 +606,13 @@ const Sec = {
     const others = Store.byDate(s.date).filter(x => x.id !== s.id && x.status !== 'cancelled');
     const day = Backtime.planDay([...others, s], { prepMin: Store.profile().prepMin });
     const mine = day.find(d => d.s === s);
-    const warns = Backtime.conflicts([...others, s]).filter(w => w.a === s || w.b === s);
+    const all = [...Store.list().filter(x => x.id !== s.id), s];
+    const warns = [...Backtime.conflictsOn(all, s.date), ...Backtime.conflictsOn(all, U.addDays(s.date, 1))].filter(w => w.a === s || w.b === s);
+    if (mine.p.warn) warns.unshift({ msg: mine.p.warn });
     const go = s.mode !== 'none';
-    const status = s.end < s.start ? `<p class="pv-status bad">${Icon.svg('alert', 15)} 종료 시간이 시작보다 빨라요</p>`
-      : warns.length ? warns.map(w => `<p class="pv-status bad">${Icon.svg('alert', 15)} ${U.esc(w.msg)}</p>`).join('')
-      : `<p class="pv-status ok">${Icon.svg('checkCircle', 15)} 같은 날 앞뒤 일정과 겹치지 않아요${s.mode === 'driver' ? ` · ${U.esc(Store.profile().driverName || '기사님')} 배차 가능` : ''}</p>`;
+    const overnight = s.end && s.end < s.start ? `<p class="pv-status">${Icon.svg('clock', 15)} 다음 날 ${s.end}에 끝나는 일정으로 저장돼요</p>` : '';
+    const status = overnight + (warns.length ? warns.map(w => `<p class="pv-status bad">${Icon.svg('alert', 15)} ${U.esc(w.msg)}</p>`).join('')
+      : `<p class="pv-status ok">${Icon.svg('checkCircle', 15)} 같은 날 앞뒤 일정과 겹치지 않아요${s.mode === 'driver' ? ` · ${U.esc(Store.profile().driverName || '기사님')} 배차 가능` : ''}</p>`);
     box.innerHTML = `<span class="pv-cap">대표님 앱에 이렇게 보여요</span>
       ${go ? `<span class="pv-cap">출발</span><b class="pv-big num">${U.hm(mine.p.leaveAt)}</b>` : `<span class="pv-cap">시작</span><b class="pv-big num">${s.start}</b>`}
       <ol class="pv">${mine.p.items.filter(it => it.kind !== 'end').map(it => `<li class="k-${it.kind}"><b class="num">${U.hm(it.at)}</b><span>${U.esc(it.title)}<small>${U.esc(it.detail || '')}</small></span></li>`).join('')}</ol>
@@ -609,7 +622,7 @@ const Sec = {
   async save(f) {
     const s = this.fromForm(f);
     if (!s.title) { U.toast('일정 이름을 입력하세요'); return false; }
-    if (s.end < s.start) { U.toast('종료 시간이 시작보다 빨라요'); return false; }
+    if (s.end < s.start && !confirm(`끝나는 시간(${s.end})이 시작(${s.start})보다 빨라요.\n다음 날 ${s.end}에 끝나는 일정으로 저장할까요?`)) return false;
     try { await Store.upsert(s); U.toast(this.edit.id ? '저장했어요. 대표님께 다시 확인을 요청했어요' : '등록했어요. 대표님 앱에 표시돼요'); return true; }
     catch (err) { U.toast('저장하지 못했어요: ' + (err.message || err)); return false; }
   },
