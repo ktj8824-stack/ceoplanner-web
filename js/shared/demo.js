@@ -5,7 +5,8 @@
 const Demo = {
   /** 데모 공지사항 */
   notices() {
-    const day = n => U.addDays(U.today(), -n) + 'T00:00:00.000Z';   // 날짜 단위로 고정 (읽을 때마다 바뀌지 않게)
+    // 데모를 처음 만들 때 한 번만 정해 저장 (매일 '새 글'로 바뀌지 않게) · 한국 시간 오전 9시
+    const day = n => U.at(U.addDays(U.today(), -n), '09:00').toISOString();
     return [
       { id: 'n1', pinned: true, at: day(3), title: 'CEO플래너에 오신 걸 환영해요',
         body: '비서님이 일정을 넣으면 대표님 앱에 바로 보여요.\n출발 · 기사 호출 시간은 앱이 거꾸로 계산해 알려 드려요.\n일정이 겹치면 홈 화면에 빨간 줄로 표시돼요.' },
@@ -27,6 +28,26 @@ const Demo = {
       { loginId: 'park', name: p.driverName || '박기사', role: 'driver', phone: p.driverPhone || '' },
     ];
   },
+  /** 지난 3주 기록 — 실제 출발·도착 시각과 식사 평가가 있는 일정 */
+  history(t, S) {
+    const at = (d, hm) => U.at(d, hm).toISOString();
+    const trip = (n, depart, min, extra = {}) => { const d = U.addDays(t, -n);
+      return S({ title: '한빛전자 실무 미팅', category: 'external', date: d, start: '10:00', end: '11:00', location: '한빛전자 삼성동 사옥', origin: '본사', mode: 'driver', travelMin: 35, ackAt: at(d, '08:00'),
+        actual: { departAt: at(d, depart), arriveAt: U.addMin(U.at(d, depart), min).toISOString() }, ...extra }); };
+    const meal = (n, title, place, rating, b = {}) => { const d = U.addDays(t, -n);
+      return S({ title, category: 'dinner', date: d, start: '12:00', end: '13:30', location: place, mode: 'driver', travelMin: 25, ackAt: at(d, '08:00'), actual: { rating }, briefing: b }); };
+    return [
+      trip(15, '09:05', 40), trip(9, '09:03', 45), trip(4, '09:08', 41),
+      // 같은 길도 퇴근 시간대(17시대)엔 60분 안팎 — 시간대별 학습 시연
+      trip(14, '17:10', 62, { title: '한빛전자 저녁 협의', start: '18:20', end: '19:30' }), trip(8, '17:05', 58, { title: '한빛전자 저녁 협의', start: '18:10', end: '19:00' }), trip(3, '17:15', 64, { title: '한빛전자 저녁 협의', start: '18:30', end: '19:30' }),
+      meal(13, '그린벤처스 점심', '광화문 한정식 소담', 'good', { who: '최서연 상무', company: '그린벤처스' }),
+      meal(11, '대한건설 오찬', '청담 스시 오마카세', 'bad', { who: '윤태식 회장', company: '대한건설' }),
+      meal(7, '한빛전자 점심', '광화문 한정식 소담', 'good', { who: '정민호 부사장', company: '한빛전자' }),
+      meal(5, '협력사 점심', '여의도 중식당 루이', 'ok', { who: '박지훈 대표', company: '루이테크' }),
+      meal(2, '이사회 오찬', '삼청동 이탈리안 산마리노', 'good', { who: '사외이사 3명', company: '' }),
+    ];
+  },
+
   build() {
     const t = U.today(), d1 = U.addDays(t, 1), d2 = U.addDays(t, 2);
     const S = (o) => ({ id: U.uid(), visibility: 'normal', bufferMin: 10, status: 'scheduled', ackAt: null, briefing: {}, createdBy: 'secretary', ...o });
@@ -43,7 +64,11 @@ const Demo = {
             briefing: { who: '윤태식 회장 외 2명', company: '대한건설', purpose: '관계 유지', notes: '동반자: 윤태식 회장, 한상우 대표, 김대표', bring: '골프백 차량 적재 확인' } }),
         S({ title: '부산 지사 방문', category: 'trip', date: d2, start: '11:00', end: '17:00', location: '부산 지사', mode: 'train', travelMin: 25,
             trip: { station: '서울역', departTime: '08:00', arriveTime: '10:30', accessMin: 30, accessMode: 'driver' } }),
+        // 지난 기록 (학습 · 추천 시연용): 본사 → 한빛전자 실제 이동 40·45·41분, 식사 장소 평가
+        ...this.history(t, S),
       ],
+      company: this.company(),
+      notices: this.notices(),
       messages: [
         { id: U.uid(), from: 'secretary', body: '대표님, 내일 라운딩은 새벽 5시 20분 출발입니다. 기사님께도 전달했습니다.', urgent: false, at: new Date(Date.now() - 3600e3).toISOString() },
       ],
