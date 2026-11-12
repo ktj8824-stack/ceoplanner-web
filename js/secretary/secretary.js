@@ -63,7 +63,7 @@ const Sec = {
   day(ymd) { return this.visible(Store.byDate(ymd)).filter(s => s.status !== 'cancelled'); },
   newMsgs() { return Store.messages().slice(this.seenMsgs).filter(m => m.from === 'ceo').length; },
   pendingAll() { return Store.list().filter(s => !s.masked && !s.ackAt && s.status !== 'cancelled' && s.date >= U.today()).sort((a, b) => (a.date + a.start).localeCompare(b.date + b.start)); },
-  conflictsOn(ymd) { return Backtime.conflictsOn(Store.list(), ymd); },
+  conflictsOn(ymd) { return Backtime.conflictsOn(Store.list(), ymd).filter(w => !(w.a.masked && w.b.masked)); },   // 대표 개인 일정끼리는 비서가 고칠 일이 아님
   dateShort(ymd) { const d = U.at(ymd, '00:00'); return `${d.getMonth() + 1}월 ${d.getDate()}일 (${U.WEEK[d.getDay()]})`; },
   whenLabel(s) {
     const rel = s.date === U.today() ? '오늘' : s.date === U.addDays(U.today(), 1) ? `내일 (${U.WEEK[U.at(s.date, '00:00').getDay()]})` : this.dateShort(s.date);
@@ -179,7 +179,7 @@ const Sec = {
               <label>임시 비밀번호<input name="password" required minlength="8" placeholder="8자 이상" autocomplete="off"></label>
               <label><span>휴대폰 <span class="muted">(선택)</span></span><input name="phone" type="tel" placeholder="010-0000-0000" autocomplete="off"></label>
             </div>
-            <p class="small muted" style="margin:0">기사님 앱 화면은 준비 중이에요. 지금은 '기사님께 배차 알림'으로 문자를 보내 주세요.</p>
+            <p class="small muted" style="margin:0">기사님은 배차 알림 문자 속 링크(배차표)에서 대기 · 출발 · 도착을 눌러 알려 줘요.</p>
             <div class="ac-foot"><span class="small ac-msg" role="status">${msg}</span><button class="btn primary" type="submit">계정 만들기</button></div>
           </form>
         </div></div>`;
@@ -312,7 +312,7 @@ const Sec = {
       try { await Store.send(`'${t ? t.title : '일정'}' 조정 요청 확인했어요. 바로 조정할게요.`, { ref: b.dataset.seenadj }); U.toast('대표님께 확인했다고 알렸어요'); }
       catch (err) { U.toast('보내지 못했어요: ' + (err.message || err)); }
     }));
-    el.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => this.shiftSchedule(b.dataset.shift, b.dataset.to)));
+    el.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => this.shiftSchedule(b.dataset.shift, b.dataset.to, b.dataset.clash)));
     el.querySelectorAll('[data-nudge]').forEach(b => b.addEventListener('click', () => this.nudge(b.dataset.nudge)));
     el.querySelectorAll('.ev.masked').forEach(b => b.addEventListener('click', e => e.stopPropagation()));
   },
@@ -364,7 +364,23 @@ const Sec = {
   fixFor(w) {
     const add = Math.ceil(w.shortMin / 5) * 5;
     const to = U.hm(U.addMin(U.at(w.b.date, w.b.start), add));
-    return { to, add };
+    const clash = this.clashAt(w.b, to);
+    // 미룬 시각이 다른 일정과 또 겹치면, 5분씩 늦춰 겹치지 않는 가장 이른 시각도 찾아 둠 (같은 날 안에서)
+    let free = null;
+    if (clash) for (let m = add + 5; m <= 12 * 60; m += 5) {
+      const t = U.addMin(U.at(w.b.date, w.b.start), m);
+      if (U.ymd(t) !== w.b.date) break;
+      if (!this.clashAt(w.b, U.hm(t))) { free = U.hm(t); break; }
+    }
+    return { to, add, clash, free };
+  },
+  /** s 를 to 로 옮기면 겹치는 다른 일정 (없으면 null) */
+  clashAt(s, to) {
+    const dur = U.diffMin(U.at(s.date, s.end), U.at(s.date, s.start));
+    const moved = { ...s, start: to, end: U.hm(U.addMin(U.at(s.date, to), dur > 0 ? dur : 60)) };
+    const all = [...Store.list().filter(x => x.id !== s.id), moved];
+    const w = [...Backtime.conflictsOn(all, s.date), ...Backtime.conflictsOn(all, U.addDays(s.date, 1))].find(x => x.a === moved || x.b === moved);
+    return w ? (w.a === moved ? w.b : w.a) : null;
   },
 
   /** 당일 동선 — 막대(기사 대기·이동은 빗금) + 현재 시각 선 + 이동 부족 해결 버튼 */
@@ -407,18 +423,22 @@ const Sec = {
       const asked = !!req;
       const seen = req && msgs.some(m => m.from === 'secretary' && m.ref === w.b.id && String(m.at) > String(req.at));
       return `<div class="fix">${Icon.svg('alert', 20)}<div><b>${U.esc(w.msg)}</b>
-        <span>${asked ? '대표님이 앱에서 조정을 요청했어요 · ' : ''}${canFix ? `'${U.esc(w.b.title)}' 시작을 ${fix.to}${this.ro(fix.to)} ${fix.add}분 미루면 해결돼요` : '대표 개인 일정과 겹쳐요'}</span></div>
-        ${asked && !seen ? `<button class="btn" data-seenadj="${w.b.id}">확인했어요</button>` : ''}${canFix ? `<button class="btn signal" data-shift="${w.b.id}" data-to="${fix.to}">${U.esc(w.b.title)} ${fix.to}${this.ro(fix.to)} 미루기</button>` : ''}</div>`;
+        <span>${asked ? '대표님이 앱에서 조정을 요청했어요 · ' : ''}${canFix ? (fix.clash
+          ? `${fix.to}${this.ro(fix.to)} 미루면 '${U.esc(fix.clash.masked ? '개인 일정' : fix.clash.title)}'${Backtime.wa(fix.clash.masked ? '개인 일정' : fix.clash.title)} 새로 겹쳐요${fix.free ? ` · ${fix.free}${this.ro(fix.free)} 미루면 다른 일정과 안 겹쳐요` : ''}`
+          : `'${U.esc(w.b.title)}' 시작을 ${fix.to}${this.ro(fix.to)} ${fix.add}분 미루면 해결돼요`) : '대표 개인 일정과 겹쳐요'}</span></div>
+        ${asked && !seen ? `<button class="btn" data-seenadj="${w.b.id}">확인했어요</button>` : ''}${canFix ? (fix.clash
+          ? `${fix.free ? `<button class="btn signal" data-shift="${w.b.id}" data-to="${fix.free}">${U.esc(w.b.title)} ${fix.free}${this.ro(fix.free)} 미루기 <small>(다른 일정과 안 겹침)</small></button>` : ''}<button class="btn" data-shift="${w.b.id}" data-to="${fix.to}" data-clash="${U.esc(fix.clash.masked ? '개인 일정' : fix.clash.title)}">${fix.to}${this.ro(fix.to)} <small>('${U.esc(fix.clash.masked ? '개인 일정' : fix.clash.title)}'${Backtime.wa(fix.clash.masked ? '개인 일정' : fix.clash.title)} 겹침)</small></button>`
+          : `<button class="btn signal" data-shift="${w.b.id}" data-to="${fix.to}">${U.esc(w.b.title)} ${fix.to}${this.ro(fix.to)} 미루기</button>`) : ''}</div>`;
     }).join('');
     return `${warnHtml}<div class="gantt"><div class="g-row g-head"><div class="g-label"></div>${scale}</div>${rows}</div>
       <p class="legend"><i class="g-move"></i> 기사 대기 · 이동 <i class="g-main cat-external"></i> 일정 ${this.cur === U.today() ? '<i class="g-now-key"></i> 지금' : ''}</p>`;
   },
 
-  async shiftSchedule(id, to) {
+  async shiftSchedule(id, to, clash) {
     const s = Store.get(id); if (!s) return;
     const dur = U.diffMin(U.at(s.date, s.end), U.at(s.date, s.start));
     const end = U.hm(U.addMin(U.at(s.date, to), dur));
-    if (!confirm(`'${s.title}' 시작을 ${s.start} → ${to}${this.ro(to)} 미룰까요? (종료 ${end})\n대표님께 다시 확인을 요청해요.`)) return;
+    if (!confirm(`'${s.title}' 시작을 ${s.start} → ${to}${this.ro(to)} 미룰까요? (종료 ${end})${clash ? `\n주의: 이 시각은 '${clash}'${Backtime.wa(clash)} 겹쳐요.` : ''}\n대표님께 다시 확인을 요청해요.`)) return;
     try {
       await Store.upsert({ ...s, start: to, end });
       await Store.send(`'${s.title}' 시작을 ${to}${this.ro(to)} 미뤘어요. 앱에서 확인 부탁드려요.`, { ref: s.id });
@@ -462,7 +482,7 @@ const Sec = {
     const p = Store.profile();
     const plans = Backtime.planDay(Store.byDate(ymd).filter(s => s.status !== 'cancelled' && !s.masked), { prepMin: p.prepMin })
       .filter(({ s }) => s.mode === 'driver' || (s.trip && s.trip.accessMode === 'driver'));
-    const lines = plans.map(({ s, p: pl }) => `${U.hm(pl.driverCallAt || pl.leaveAt)} 대기 → ${U.hm(pl.leaveAt)} 출발 · ${s.trip ? (s.trip.station || '역') : (s.location || '')} (${s.start} ${s.title})`);
+    const lines = plans.map(({ s, p: pl }) => `${U.hm(pl.driverCallAt || pl.leaveAt)} ${s.origin || this.originFor(s.date, s.start, s.id)} 대기 → ${U.hm(pl.leaveAt)} 출발 · ${s.trip ? (s.trip.station || '역') : (s.location || '')} (${s.start} ${s.title})`);
     const link = CEOP_CONFIG.DRIVER_URL ? `\n배차표 · 대기/출발/도착 알리기: ${new URL(CEOP_CONFIG.DRIVER_URL, location.href).href}` : '';
     const text = lines.length ? `[${this.dateShort(ymd)} 배차]\n${lines.join('\n')}${link}\n- ${p.secretaryName || '비서'}` : '';
     const back = document.createElement('div');
@@ -624,8 +644,9 @@ const Sec = {
     const warns = [...Backtime.conflictsOn(all, s.date), ...Backtime.conflictsOn(all, U.addDays(s.date, 1))].filter(w => w.a === s || w.b === s);
     if (mine.p.warn) warns.unshift({ msg: mine.p.warn });
     const go = s.mode !== 'none';
+    const past = s.date && s.start && U.at(s.date, s.start) < new Date() && !(this.edit && this.edit.id) ? `<p class="pv-status">${Icon.svg('info', 15)} 이미 지난 시각이에요 — 기록용이면 그대로 저장하세요 (대표님 확인 대기에는 안 들어가요)</p>` : '';
     const overnight = s.end && s.end < s.start ? `<p class="pv-status">${Icon.svg('clock', 15)} 다음 날 ${s.end}에 끝나는 일정으로 저장돼요</p>` : '';
-    const status = overnight + (warns.length ? warns.map(w => `<p class="pv-status bad">${Icon.svg('alert', 15)} ${U.esc(w.msg)}</p>`).join('')
+    const status = past + overnight + (warns.length ? warns.map(w => `<p class="pv-status bad">${Icon.svg('alert', 15)} ${U.esc(w.msg)}</p>`).join('')
       : `<p class="pv-status ok">${Icon.svg('checkCircle', 15)} 같은 날 앞뒤 일정과 겹치지 않아요${s.mode === 'driver' ? ` · ${U.esc(Store.profile().driverName || '기사님')} 배차 가능` : ''}</p>`);
     box.innerHTML = `<span class="pv-cap">대표님 앱에 이렇게 보여요</span>
       ${go ? `<span class="pv-cap">출발</span><b class="pv-big num">${U.hm(mine.p.leaveAt)}</b>` : `<span class="pv-cap">시작</span><b class="pv-big num">${s.start}</b>`}
