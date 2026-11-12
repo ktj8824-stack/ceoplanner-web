@@ -37,6 +37,7 @@ const Sec = {
           <header class="main-head" id="head"></header>
           <div id="planbar"></div>
           <div id="urgent"></div>
+          <div id="alerts"></div>
           <section class="panel" id="stats"></section>
           <section class="panel cal" id="cal"></section>
         </main>
@@ -44,7 +45,7 @@ const Sec = {
       <aside class="drawer" id="drawer" aria-hidden="true"></aside>
       <div class="plan-lock-back" id="planlock" hidden></div>`;
     Store.on(() => this.refresh());
-    setInterval(() => { this.renderStats(); if (this.view === 'day') this.renderCal(); }, 60000);
+    setInterval(() => { this.renderStats(); this.renderAlerts(); if (this.view === 'day') this.renderCal(); }, 60000);
     this.refresh();
   },
 
@@ -53,6 +54,7 @@ const Sec = {
     this.renderSide();
     this.renderHead();
     this.renderUrgent();
+    this.renderAlerts();
     this.renderStats();
     this.renderCal();
     if (this.chatOpen) this.renderDrawer();
@@ -242,6 +244,32 @@ const Sec = {
     el.querySelector('[data-seen]').addEventListener('click', () => {
       this.seenUrgent = urgent.length; localStorage.setItem('CEOP_SEEN_SEC_URGENT', String(urgent.length)); this.renderUrgent();
     });
+  },
+
+  /** 먼저 알려 주는 띠: ① 이동 중 늦을 것 같은 일정 (출발 기록 + 도착 예상)  ② 저녁 6시 이후 내일 브리핑 안 보냈을 때 */
+  renderAlerts() {
+    const el = document.getElementById('alerts'); if (!el) return;
+    const now = new Date(), msgs = Store.messages(), all = Store.list();
+    const rows = [];
+    for (const s of Store.byDate(U.today())) {
+      if (s.masked || s.status === 'cancelled') continue;
+      const e = Learn.eta(s, msgs, all);
+      if (!e || e.late <= 0 || U.diffMin(now, U.at(s.date, s.start)) > 60) continue;
+      rows.push(`<div class="alert-band late">${Icon.svg('alert', 18)}<span><b>'${U.esc(s.title)}' 약 ${e.late}분 늦을 것 같아요</b><small>출발 ${U.hm(e.depart)} · 도착 예상 ${U.hm(e.at)} · 시작 ${s.start}${e.learned ? ` · ${e.slotLabel || '지난 기록'} 평균 ${e.min}분` : ''}</small></span>
+        ${s.briefing && s.briefing.who ? `<button class="btn" data-latedraft="${s.id}" data-min="${e.late}">${Icon.svg('sms', 15)} ${U.esc(s.briefing.who.split(' ')[0])}님께 문자 초안</button>` : ''}</div>`);
+    }
+    const t1 = U.addDays(U.today(), 1);
+    const tomorrow = Store.byDate(t1).filter(s => s.status !== 'cancelled');
+    const sent = msgs.some(m => m.from === 'secretary' && m.ref === 'brief:' + t1);
+    let skip = ''; try { skip = localStorage.getItem('CEOP_BRIEF_SKIP') || ''; } catch { /* */ }
+    if (now.getHours() >= 18 && tomorrow.length && !sent && skip !== t1) {
+      rows.push(`<div class="alert-band brief">${Icon.svg('file', 18)}<span><b>내일 브리핑을 아직 안 보냈어요</b><small>내일 일정 ${tomorrow.length}건 · 보내면 대표님 앱에 '모두 확인'이 떠요</small></span>
+        <button class="btn primary" data-briefnow>브리핑 보내기</button><button class="btn quiet" data-briefskip>오늘은 안 보내기</button></div>`);
+    }
+    el.innerHTML = rows.join('');
+    el.querySelectorAll('[data-latedraft]').forEach(b => b.addEventListener('click', () => { const s = Store.get(b.dataset.latedraft); if (s) this.openDraft(s, Drafts.late(s, b.dataset.min, Store.profile())); }));
+    el.querySelector('[data-briefnow]')?.addEventListener('click', () => this.openBrief(t1));
+    el.querySelector('[data-briefskip]')?.addEventListener('click', () => { try { localStorage.setItem('CEOP_BRIEF_SKIP', t1); } catch { /* */ } this.renderAlerts(); });
   },
 
   // ───────── 오늘 현황 (모든 숫자는 오늘 기준) ─────────
@@ -686,8 +714,9 @@ const Sec = {
   syncHelpers(f, back, s) {
     const hint = back.querySelector('#learnHint');
     if (hint) {
-      const t = s.mode !== 'none' && !Backtime.isTrip(s.mode) && s.location ? Learn.travel(Store.list().filter(x => x.id !== s.id), Store.messages(), { origin: s.origin, location: s.location }) : null;
-      const html = t ? `${Icon.svg('clock', 14)} <span>지난 ${t.n}번 실제로 <b>평균 ${t.avg}분</b> 걸렸어요 <small>(${t.mins.join(' · ')}분${t.sameOrigin ? ` · ${U.esc(s.origin)}에서` : ''})</small></span>${Number(s.travelMin) !== t.avg ? ` <button type="button" class="btn sm" data-applymin="${t.avg}">${t.avg}분으로</button>` : ''}` : '';
+      const leaveAt = s.date && s.start ? U.addMin(U.at(s.date, s.start), -(Number(s.travelMin || 0) + Number(s.bufferMin || 0))) : null;
+      const t = s.mode !== 'none' && !Backtime.isTrip(s.mode) && s.location ? Learn.travel(Store.list().filter(x => x.id !== s.id), Store.messages(), { origin: s.origin, location: s.location, at: leaveAt }) : null;
+      const html = t ? `${Icon.svg('clock', 14)} <span>${t.slotLabel ? `${t.slotLabel}에 ` : ''}지난 ${t.n}번 실제로 <b>평균 ${t.avg}분</b> 걸렸어요 <small>(${t.mins.join(' · ')}분${t.sameOrigin ? ` · ${U.esc(s.origin)}에서` : ''})</small></span>${Number(s.travelMin) !== t.avg ? ` <button type="button" class="btn sm" data-applymin="${t.avg}">${t.avg}분으로</button>` : ''}` : '';
       if (hint._html !== html) { hint.innerHTML = html; hint._html = html; }   // 같은 내용이면 다시 그리지 않음 (누르는 중인 버튼이 사라지지 않게)
       hint.hidden = !t;
     }
@@ -764,6 +793,8 @@ const Sec = {
     const ch = m.body.match(/(\d{1,2}:\d{2})\s*→\s*(\d{1,2}:\d{2})/);
     if (ch && /바꿨어요/.test(m.body)) return { s, text: Drafts.change(s, { date: s.date, start: ch[1] }, { date: s.date, start: ch[2] }, Store.profile()) };
     if (/취소했어요/.test(m.body)) return { s, text: Drafts.cancel(s, Store.profile()) };
+    const late = m.body.match(/약\s*(\d+)분 늦을|(\d+)분 정도 늦을/);
+    if (late) return { s, text: Drafts.late(s, late[1] || late[2], Store.profile()) };
     return null;
   },
 
