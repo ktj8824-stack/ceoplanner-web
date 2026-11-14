@@ -592,7 +592,7 @@ const Sec = {
       </form>
       <aside class="ed-preview" id="preview"></aside>
       </div>
-      <div class="ed-foot">${target.id ? '<button type="button" class="btn quiet" data-del>일정 삭제</button>' : ''}<span style="flex:1"></span>
+      <div class="ed-foot">${target.id ? '<button type="button" class="btn quiet" data-del>일정 삭제</button>' : ''}${target.id && s.category !== 'personal' ? '<button type="button" class="btn" data-invite>손님에게 초대장 보내기</button>' : ''}<span style="flex:1"></span>
         <button type="button" class="btn" data-close>취소</button><button class="btn primary" form="ef">${target.id ? '저장하고 다시 확인 요청' : '등록하고 대표님께 보내기'}</button></div>
     </div>`;
     const close = () => { if (this.dirty && !confirm('저장하지 않은 내용이 있어요. 닫을까요?')) return; this.edit = null; this.dirty = false; back.remove(); };
@@ -619,6 +619,7 @@ const Sec = {
       if (pl) { f.elements.location.value = pl.dataset.pickplace; this.dirty = true; this.syncForm(f, back); }
     });
     back.querySelector('[data-del]')?.addEventListener('click', () => this.deleteFlow(target.id, () => { this.dirty = false; this.edit = null; back.remove(); }));
+    back.querySelector('[data-invite]')?.addEventListener('click', () => this.openInvite(target.id));
     document.body.appendChild(back);
     this.syncForm(f, back);
     f.title.focus();
@@ -744,6 +745,46 @@ const Sec = {
   },
 
   /** 삭제: 반복 일정이면 '이 일정만 / 이후 모두' 고르기, 만날 분이 있으면 취소 문자 초안 */
+  /** 손님용 미팅 초대장: 링크 안에 미팅 정보만 (서버 저장 없음). 받은 사람은 출발지·준비 시간·이동 수단만 고르면 출발 시간이 나옴 */
+  INVITE_BASE: 'https://ktj8824-stack.github.io/ceoplanner-web/invite.html',
+  openInvite(id) {
+    const s = Store.get(id); if (!s) return;
+    let co = ''; try { co = localStorage.getItem('ceo_company_name') || ''; } catch { /* */ }
+    const back = document.createElement('div');
+    back.className = 'modal-back';
+    back.innerHTML = `<div class="modal dispatch" role="dialog" aria-label="손님에게 초대장 보내기">
+      <div class="ed-head"><div><h3>손님에게 초대장 보내기</h3><p class="muted small">${U.esc(s.title)} · ${this.dateShort(s.date)} ${U.esc(s.start)}</p></div>
+        <button class="icon-btn" data-close aria-label="닫기">${Icon.svg('x', 18)}</button></div>
+      <div class="dp-body">
+        <p class="muted small" style="margin:0 0 10px">손님은 로그인·설치 없이 링크를 열어 출발지만 고르면 출발 시간과 길안내가 나와요. 미팅 이름·날짜·시각·장소만 보내요.</p>
+        <label class="dp-text">회사 이름 (초대장 맨 위)<input id="inv-co" value="${U.esc(co)}" placeholder="예) 한빛전자"></label>
+        <label class="dp-text">손님께 한마디 <span class="muted">(선택)</span><input id="inv-note" placeholder="예) 1층 안내데스크에서 방문증 받아 주세요"></label>
+        <label class="dp-text">보낼 글<textarea id="inv-msg" rows="8" readonly></textarea></label>
+      </div>
+      <div class="ed-foot"><span style="flex:1"></span><button class="btn" data-close>닫기</button><button class="btn" data-copy>복사</button><button class="btn primary" data-send>보내기 (카톡 등)</button></div></div>`;
+    document.body.appendChild(back);
+    const build = () => {
+      const c = back.querySelector('#inv-co').value.trim(), n = back.querySelector('#inv-note').value.trim();
+      try { localStorage.setItem('ceo_company_name', c); } catch { /* */ }
+      const o = { v: 1, id: String(s.id).slice(0, 12), c, t: s.title, d: s.date, s: s.start, l: s.location || '' };
+      if (n) o.n = n.slice(0, 120);
+      const bin = Array.from(new TextEncoder().encode(JSON.stringify(o)), x => String.fromCharCode(x)).join('');
+      const url = this.INVITE_BASE + '?i=' + btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      const dt = new Date(s.date + 'T00:00:00');
+      const when = `${dt.getMonth() + 1}월 ${dt.getDate()}일 (${'일월화수목금토'[dt.getDay()]}) ${s.start}`;
+      const text = `💼 [${c || '미팅'}] 미팅 초대\n▪ 미팅  ${s.title}\n▪ 장소  ${s.location || '-'}\n▪ 일시  ${when}\n출발지만 고르면 출발 시간·길안내가 맞춰져요\n\n▶ 눌러서 받기\n${url}`;
+      back.querySelector('#inv-msg').value = text;
+      return { text, url };
+    };
+    build();
+    back.querySelectorAll('input').forEach(i => i.addEventListener('input', build));
+    back.addEventListener('click', async e => {
+      if (e.target === back || e.target.closest('[data-close]')) return back.remove();
+      if (e.target.closest('[data-copy]')) { const { text } = build(); try { await navigator.clipboard.writeText(text); U.toast('복사했어요. 카톡에 붙여넣어 보내 주세요'); } catch { prompt('길게 눌러 복사하세요', text); } }
+      if (e.target.closest('[data-send]')) { const { text } = build(); if (navigator.share) { try { await navigator.share({ text }); } catch { /* */ } } else { try { await navigator.clipboard.writeText(text); U.toast('복사했어요. 카톡에 붙여넣어 보내 주세요'); } catch { prompt('길게 눌러 복사하세요', text); } } }
+    });
+  },
+
   deleteFlow(id, done) {
     const s = Store.get(id); if (!s) return;
     const later = s.series ? Store.list().filter(x => x.series === s.series && x.date > s.date && x.status !== 'cancelled') : [];

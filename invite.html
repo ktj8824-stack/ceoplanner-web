@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#0b1324">
+  <title>미팅 초대</title>
+  <link rel="icon" href="icon.svg">
+  <style>
+    :root { --ink:#111827; --sub:#6b7280; --line:#e5e7eb; --navy:#0b1324; --bg:#F6F7F9; }
+    * { box-sizing:border-box; margin:0; padding:0; }
+    body { background:var(--bg); color:var(--ink); font-family:-apple-system,BlinkMacSystemFont,'Pretendard','Apple SD Gothic Neo','Malgun Gothic','Noto Sans CJK KR',sans-serif; -webkit-font-smoothing:antialiased; }
+    header { background:var(--navy); color:#fff; padding:calc(16px + env(safe-area-inset-top)) 18px 16px; }
+    header .co { font-size:13px; color:#c9b47a; font-weight:800; letter-spacing:.04em; }
+    header h1 { font-size:22px; margin-top:4px; letter-spacing:-.03em; }
+    main { max-width:520px; margin:0 auto; padding:16px 16px calc(28px + env(safe-area-inset-bottom)); }
+    .card { background:#fff; border:1px solid var(--line); border-radius:18px; padding:16px; margin-bottom:12px; }
+    .ss-row { display:flex; gap:12px; align-items:center; padding:9px 0; }
+    .ss-row + .ss-row { border-top:1px solid #f1f5f9; }
+    .ss-i { width:36px; height:36px; border-radius:50%; background:#eef1f6; color:var(--navy); display:flex; align-items:center; justify-content:center; flex:none; }
+    .ss-row small { display:block; font-size:12px; color:#8a94a6; } .ss-row b { font-size:15.5px; }
+    .rs-step { margin:0 -8px 10px; padding:12px 10px; border-radius:14px; border:2px solid transparent; scroll-margin-top:12px; transition:background .25s,border-color .25s,opacity .25s; }
+    .rs-q { display:flex; align-items:center; gap:8px; font-weight:800; font-size:16px; margin-bottom:8px; }
+    .rs-q em { font-style:normal; width:24px; height:24px; border-radius:50%; background:#cbd5e1; color:#fff; font-size:13px; display:flex; align-items:center; justify-content:center; flex:none; }
+    .rs-now { display:none; font-size:14px; font-weight:800; color:#059669; margin:-4px 0 10px 32px; }
+    .rs-now::before { content:''; display:inline-block; width:7px; height:7px; border-right:2.5px solid currentColor; border-bottom:2.5px solid currentColor; transform:rotate(45deg); margin:0 8px 3px 2px; vertical-align:middle; }
+    .rs-step.now { background:#ecfdf5; border-color:#10b981; box-shadow:0 0 0 4px rgba(16,185,129,.15); }
+    .rs-step.now .rs-now { display:block; animation:bob 1.2s ease-in-out infinite; }
+    .rs-step.now .rs-q em { background:#10b981; animation:pulse 1.4s ease-out infinite; }
+    .rs-step.done .rs-q em { background:#10b981; } .rs-step.wait { opacity:.4; }
+    .pills { display:flex; flex-wrap:wrap; gap:8px; }
+    .pills button { height:42px; padding:0 14px; border-radius:12px; border:1.5px solid #e2e6ec; background:#fff; font-size:15px; font-weight:700; color:#334155; font-family:inherit; cursor:pointer; display:inline-flex; align-items:center; gap:6px; }
+    .pills button.on { background:var(--navy); border-color:var(--navy); color:#fff; }
+    .pills svg { width:17px; height:17px; }
+    .srch { display:flex; gap:8px; margin-top:8px; } .srch input { flex:1; height:42px; border:1.5px solid #e2e6ec; border-radius:12px; padding:0 12px; font-size:15px; font-family:inherit; }
+    .srch button { height:42px; padding:0 14px; border:0; border-radius:12px; background:var(--navy); color:#fff; font-weight:800; font-family:inherit; }
+    .res button { display:block; width:100%; text-align:left; padding:10px 4px; border:0; border-bottom:1px solid #f1f5f9; background:none; font-size:14.5px; font-family:inherit; }
+    .res small { display:block; color:var(--sub); font-size:12px; }
+    .plan { background:var(--navy); color:#fff; border-radius:16px; padding:16px; }
+    .plan .big { font-size:32px; font-weight:800; } .plan .big small { font-size:15px; margin-left:6px; opacity:.85; }
+    .plan .sub { font-size:13.5px; opacity:.82; margin-top:4px; line-height:1.6; }
+    .btns { display:flex; gap:8px; margin-top:12px; } .btn { flex:1; height:46px; border-radius:12px; border:1px solid var(--line); background:#fff; color:var(--ink); font-size:15px; font-weight:800; display:flex; align-items:center; justify-content:center; gap:6px; text-decoration:none; }
+    .dot { width:10px; height:10px; border-radius:3px; display:inline-block; }
+    .home { width:100%; display:flex; gap:12px; align-items:center; padding:14px; border:1.5px solid #e2e6ec; border-radius:16px; background:#fff; text-align:left; font-family:inherit; margin-top:10px; }
+    .home .i { width:44px; height:44px; border-radius:14px; background:#eef1f6; color:var(--navy); display:flex; align-items:center; justify-content:center; flex:none; }
+    .home b { display:block; font-size:15.5px; } .home small { color:var(--sub); font-size:13px; }
+    .again { display:block; margin:10px auto 0; border:0; background:none; color:var(--sub); font-size:13.5px; text-decoration:underline; font-family:inherit; }
+    .note { font-size:12.5px; color:var(--sub); text-align:center; line-height:1.6; margin-top:6px; }
+    .msg { text-align:center; padding:60px 20px; color:var(--sub); }
+    @keyframes pulse { 0% { box-shadow:0 0 0 0 rgba(16,185,129,.55); } 100% { box-shadow:0 0 0 10px rgba(16,185,129,0); } }
+    @keyframes bob { 0%,100% { transform:translateY(0); } 50% { transform:translateY(3px); } }
+  </style>
+</head>
+<body>
+  <header><div class="co" id="co">CEO PLANNER</div><h1 id="ttl">미팅 초대</h1></header>
+  <main id="root"><div class="msg">초대장을 여는 중…</div></main>
+  <script>
+  /* CEO플래너 — 손님용 미팅 초대장 (로그인·설치 없이)
+     링크 안에 미팅 정보(회사·제목·날짜·시각·장소)만 들어 있음. 서버에 저장하지 않음.
+     받은 사람: ① 출발지 ② 준비 시간 ③ 이동 수단 → 내 출발 시간 + 길안내 (버디플래너와 같은 단계 안내) */
+  (function () {
+    'use strict';
+    // 장소 검색·길 시간: 경로 서버 함수 (키는 서버에만 있음) — 시안: 로드플래너와 같은 함수 사용, 출시 전 CEO 전용 함수로 교체
+    var ROUTE = 'https://iaccdqcthhtvvetmbryr.supabase.co/functions/v1/manager-planner-route';
+    var ANON = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlhY2NkcWN0aGh0dnZldG1icnlyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM0MzM1MDksImV4cCI6MjEwOTAwOTUwOX0.WUuGsdr-mG0gEqhEFQTS0ew8Kr6uy9l7PZ6pXe5zbRM';
+    var DAYS = ['일', '월', '화', '수', '목', '금', '토'];
+    var root = document.getElementById('root');
+    function esc(v) { return String(v == null ? '' : v).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); }
+    function b64d(s) { s = s.replace(/-/g, '+').replace(/_/g, '/'); while (s.length % 4) s += '='; var bin = atob(s); return new TextDecoder().decode(Uint8Array.from(bin, function (c) { return c.charCodeAt(0); })); }
+    var S = 'width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+    var IC = {
+      brief: '<svg ' + S + '><rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7M3 12.5h18"/></svg>',
+      cal: '<svg ' + S + '><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>',
+      pin: '<svg ' + S + '><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0C18.5 15.4 12 21 12 21Z"/><circle cx="12" cy="10" r="2.3"/></svg>',
+      car: '<svg ' + S + '><path d="M5 12 6.9 7.3A2 2 0 0 1 8.8 6h6.4a2 2 0 0 1 1.9 1.3L19 12"/><rect x="3.5" y="12" width="17" height="5" rx="1.5"/><path d="M6.5 17v2M17.5 17v2"/></svg>',
+      taxi: '<svg ' + S + '><path d="M10 6V3.8h4V6"/><path d="M5 12 6.9 7.3A2 2 0 0 1 8.8 6h6.4a2 2 0 0 1 1.9 1.3L19 12"/><rect x="3.5" y="12" width="17" height="5" rx="1.5"/></svg>',
+      bus: '<svg ' + S + '><rect x="5" y="3" width="14" height="15" rx="3"/><path d="M5 7.5h14M5 12h14M8 18v2.5M16 18v2.5"/></svg>',
+      home: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 11 12 4l8.5 7"/><path d="M5.5 9.5V20h13V9.5"/><path d="M10 20v-5h4v5"/></svg>'
+    };
+    var inv;
+    try { inv = JSON.parse(b64d(new URLSearchParams(location.search).get('i') || '')); } catch (e) { inv = null; }
+    if (!inv || !inv.t || !inv.d || !inv.s) { root.innerHTML = '<div class="msg"><b>초대장을 열 수 없어요</b><br>받으신 링크 전체를 다시 눌러 주세요.</div>'; return; }
+    document.getElementById('co').textContent = inv.c || 'CEO PLANNER';
+    document.getElementById('ttl').textContent = inv.t;
+    document.title = (inv.c ? inv.c + ' · ' : '') + inv.t;
+    var KEY = 'ceo_inv_' + (inv.id || (inv.d + inv.s + inv.t)).slice(0, 40);
+    var g; try { g = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { } g = g || { origin: null, prep: null, mode: null };
+    var st = { searching: false, results: [], travel: null, calc: false };
+    function saveG() { try { localStorage.setItem(KEY, JSON.stringify(g)); } catch (e) { } }
+    function homeSaved() { try { return JSON.parse(localStorage.getItem('ceo_inv_home') || 'null'); } catch (e) { return null; } }
+    function call(service, params) {
+      return fetch(ROUTE, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + ANON, apikey: ANON }, body: JSON.stringify(Object.assign({ service: service }, params)) })
+        .then(function (r) { return r.ok ? r.json() : null; }).catch(function () { return null; });
+    }
+    function search(q) { return call('kakao_keyword', { query: q }).then(function (d) { return (d && d.documents) || []; }); }
+    function step() { if (!g.origin) return 'origin'; if (g.prep == null) return 'prep'; if (!g.mode) return 'mode'; return 'done'; }
+    function dt() { var x = new Date(inv.d + 'T00:00:00'); return (x.getMonth() + 1) + '월 ' + x.getDate() + '일 (' + DAYS[x.getDay()] + ') ' + inv.s; }
+    function hm(m) { m = ((m % 1440) + 1440) % 1440; return ('0' + Math.floor(m / 60)).slice(-2) + ':' + ('0' + (m % 60)).slice(-2); }
+    function nav() {
+      var q = encodeURIComponent(inv.l || ''), mobile = /iPhone|iPad|Android/i.test(navigator.userAgent);
+      var kakao = 'https://map.kakao.com/link/search/' + q, tmap = mobile ? 'tmap://search?name=' + q : kakao;
+      return '<div class="btns"><a class="btn" data-go="' + esc(tmap) + '"><span class="dot" style="background:#111"></span>TMAP</a><a class="btn" data-go="' + esc(kakao) + '" target="_blank" rel="noopener"><span class="dot" style="background:#fee500;border:1px solid #e5cf00"></span>카카오맵</a></div>';
+    }
+    var MODES = [['car', '자가용', IC.car, 1], ['taxi', '택시', IC.taxi, 1], ['transit', '대중교통', IC.bus, 1.6]];
+    function draw(scroll) {
+      var now = step(), order = ['origin', 'prep', 'mode'], ni = now === 'done' ? 99 : order.indexOf(now);
+      function cls(k) { var i = order.indexOf(k); return i === ni ? 'now' : i < ni ? 'done' : 'wait'; }
+      function num(k) { var i = order.indexOf(k); return i < ni ? '✓' : String(i + 1); }
+      var h = '<div class="card">' +
+        '<div class="ss-row"><span class="ss-i">' + IC.brief + '</span><div><small>미팅</small><b>' + esc(inv.t) + '</b></div></div>' +
+        '<div class="ss-row"><span class="ss-i">' + IC.cal + '</span><div><small>일시</small><b>' + esc(dt()) + '</b></div></div>' +
+        (inv.l ? '<div class="ss-row"><span class="ss-i">' + IC.pin + '</span><div><small>장소</small><b>' + esc(inv.l) + '</b></div></div>' : '') +
+        (inv.n ? '<div class="note" style="text-align:left;margin-top:8px">' + esc(inv.n) + '</div>' : '') + '</div>';
+      h += '<div class="card" id="recv">';
+      if (now === 'done') {
+        var m = MODES.filter(function (x) { return x[0] === g.mode; })[0];
+        var p = inv.s.split(':'), at = (+p[0]) * 60 + (+p[1]);
+        var body = st.travel == null ? '<div class="sub">' + (st.calc ? '길을 찾는 중…' : '이동 시간을 계산하지 못했어요. 아래 길안내로 확인해 주세요.') + '</div>'
+          : (function () { var t = Math.round(st.travel * m[3]), dep = at - t - 10, pr = dep - g.prep;
+              return '<div class="big">' + hm(dep) + '<small>출발</small></div><div class="sub">' + hm(pr) + ' 준비 시작 (' + g.prep + '분) · ' + m[1] + ' 약 ' + t + '분 · ' + inv.s + ' 도착 (여유 10분)<br>' + esc(g.origin.name) + ' → ' + esc(inv.l) + '</div>'; })();
+        h += '<div class="rs-q" style="margin-bottom:10px">내 출발 시간</div><div class="plan">' + body + nav() + '</div>' +
+          '<button class="home" data-r="home2"><span class="i">' + IC.home + '</span><span><b>홈 화면에 추가</b><small>아이콘 누르면 이 초대장이 바로 열려요</small></span></button>' +
+          '<button class="again" data-r="reset">출발지·준비 시간 다시 고르기</button>';
+      } else {
+        var hs = homeSaved(), P = [20, 30, 40, 50, 60, 70, 80, 90];
+        h += '<div class="rs-q" style="margin-bottom:10px;font-size:17px">내 출발 시간 맞추기</div>';
+        h += '<div class="rs-step ' + cls('origin') + '" id="st-origin"><div class="rs-q"><em>' + num('origin') + '</em>어디서 출발하세요?</div><div class="rs-now">출발지를 골라 주세요</div><div class="pills">' +
+          (hs ? '<button data-r="saved" class="' + (g.label === '저장' ? 'on' : '') + '">' + esc(hs.name) + '</button>' : '') +
+          '<button data-r="here" class="' + (g.label === '지금' ? 'on' : '') + '">지금 위치</button>' +
+          '<button data-r="search" class="' + (g.label === '직접' ? 'on' : '') + '">' + (g.label === '직접' && g.origin ? esc(g.origin.name) : '직접 입력') + '</button></div>' +
+          (st.searching ? '<div class="srch"><input id="rq" placeholder="회사·동네·역 이름" enterkeyhint="search"><button data-r="find">검색</button></div><div class="res">' +
+            st.results.map(function (p, i) { return '<button data-pick="' + i + '"><b>' + esc(p.place_name) + '</b><small>' + esc(p.address_name || '') + '</small></button>'; }).join('') + '</div>' : '') + '</div>';
+        h += '<div class="rs-step ' + cls('prep') + '" id="st-prep"><div class="rs-q"><em>' + num('prep') + '</em>나가기 전 준비 시간</div><div class="rs-now">준비 시간을 골라 주세요</div><div class="pills">' +
+          P.map(function (v) { return '<button data-prep="' + v + '" class="' + (g.prep === v ? 'on' : '') + '">' + v + '분</button>'; }).join('') + '</div></div>';
+        h += '<div class="rs-step ' + cls('mode') + '" id="st-mode"><div class="rs-q"><em>' + num('mode') + '</em>무엇을 타고 오세요?</div><div class="rs-now">이동 수단을 골라 주세요</div><div class="pills">' +
+          MODES.map(function (x) { return '<button data-mode="' + x[0] + '" class="' + (g.mode === x[0] ? 'on' : '') + '">' + x[2] + x[1] + '</button>'; }).join('') + '</div></div>';
+      }
+      h += '</div><div class="note">' + esc(inv.c || '') + ' 초대장 · CEO플래너</div>';
+      root.innerHTML = h;
+      root.querySelectorAll('a[data-go]').forEach(function (a) { a.setAttribute('href', a.getAttribute('data-go')); });
+      if (scroll) setTimeout(function () { var t = document.getElementById('st-' + step()) || document.getElementById('recv'); t.scrollIntoView({ behavior: 'smooth', block: 'start' }); }, 120);
+    }
+    function compute() {
+      if (!g.origin || !inv.l) return;
+      st.calc = true; st.travel = null;
+      search(inv.l).then(function (r) {
+        var p = r[0]; if (!p) return null;
+        return call('tmap_route', { sx: g.origin.lng, sy: g.origin.lat, ex: p.x, ey: p.y }).then(function (d) {
+          var f = d && d.features && d.features[0]; return f && f.properties ? Math.ceil(f.properties.totalTime / 60) : null; });
+      }).then(function (m) { st.travel = m; }).then(function () { st.calc = false; draw(false); });
+    }
+    function after(adv) { saveG(); if (step() === 'done') compute(); draw(adv); }
+    function setOrigin(o, label) { var f = !g.origin; g.origin = o; g.label = label; st.searching = false; if (label !== '지금') try { localStorage.setItem('ceo_inv_home', JSON.stringify(o)); } catch (e) { } after(f); }
+    root.addEventListener('click', function (e) {
+      var b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.prep) { var f = g.prep == null; g.prep = +b.dataset.prep; return after(f); }
+      if (b.dataset.mode) { var f2 = !g.mode; g.mode = b.dataset.mode; return after(f2); }
+      if (b.dataset.pick) { var p = st.results[+b.dataset.pick]; return setOrigin({ name: p.place_name, lat: +p.y, lng: +p.x }, '직접'); }
+      var r = b.dataset.r;
+      if (r === 'saved') return setOrigin(homeSaved(), '저장');
+      if (r === 'here') { if (!navigator.geolocation) return alert('위치를 쓸 수 없어요. 직접 입력해 주세요.');
+        return navigator.geolocation.getCurrentPosition(function (pos) { setOrigin({ name: '지금 위치', lat: pos.coords.latitude, lng: pos.coords.longitude }, '지금'); }, function () { alert('위치를 가져오지 못했어요. 직접 입력해 주세요.'); }, { timeout: 8000 }); }
+      if (r === 'search') { st.searching = true; st.results = []; draw(false); setTimeout(function () { var i = document.getElementById('rq'); if (i) i.focus(); }, 50); return; }
+      if (r === 'find') { var q = (document.getElementById('rq') || {}).value || ''; return search(q).then(function (res) { st.results = res.slice(0, 6); draw(false); var i = document.getElementById('rq'); if (i) i.value = q; }); }
+      if (r === 'reset') { g = { origin: null, prep: null, mode: null }; saveG(); return draw(true); }
+      if (r === 'home2') { var ios = /iPhone|iPad/i.test(navigator.userAgent); alert(ios ? '아래 공유 버튼 → 홈 화면에 추가를 눌러 주세요.' : '오른쪽 위 ⋮ 메뉴 → 홈 화면에 추가를 눌러 주세요.'); }
+    });
+    draw(false);
+    if (step() === 'done') compute();
+  })();
+  </script>
+</body>
+</html>
