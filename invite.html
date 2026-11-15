@@ -88,12 +88,20 @@
     };
     var inv;
     try { inv = JSON.parse(b64d(new URLSearchParams(location.search).get('i') || '')); } catch (e) { inv = null; }
+    // 링크 값은 누구나 바꿀 수 있으므로 날짜·시각 형식을 먼저 확인 (형식이 다르면 열지 않음)
+    if (inv && typeof inv === 'object') {
+      var sm = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(inv.s || ''));
+      inv.s = sm ? ('0' + sm[1]).slice(-2) + ':' + sm[2] : '';
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(inv.d || '')) || isNaN(new Date(inv.d + 'T00:00:00').getTime())) inv.d = '';
+      ['t', 'c', 'l', 'n', 'id'].forEach(function (k) { if (inv[k] != null) inv[k] = String(inv[k]).slice(0, 200); });
+    }
     if (!inv || !inv.t || !inv.d || !inv.s) { root.innerHTML = '<div class="msg"><b>초대장을 열 수 없어요</b><br>받으신 링크 전체를 다시 눌러 주세요.</div>'; return; }
     document.getElementById('co').textContent = inv.c || 'CEO PLANNER';
     document.getElementById('ttl').textContent = inv.t;
     document.title = (inv.c ? inv.c + ' · ' : '') + inv.t;
     var KEY = 'ceo_inv_' + (inv.id || (inv.d + inv.s + inv.t)).slice(0, 40);
     var g; try { g = JSON.parse(localStorage.getItem(KEY) || 'null'); } catch (e) { } g = g || { origin: null, prep: null, mode: null };
+    if (g.prep != null) { g.prep = Number(g.prep); if (!(g.prep >= 0 && g.prep <= 600)) g.prep = null; }
     var st = { searching: false, results: [], travel: null, calc: false };
     function saveG() { try { localStorage.setItem(KEY, JSON.stringify(g)); } catch (e) { } }
     function homeSaved() { try { return JSON.parse(localStorage.getItem('ceo_inv_home') || 'null'); } catch (e) { return null; } }
@@ -126,7 +134,7 @@
         var p = inv.s.split(':'), at = (+p[0]) * 60 + (+p[1]);
         var body = st.travel == null ? '<div class="sub">' + (st.calc ? '길을 찾는 중…' : '이동 시간을 계산하지 못했어요. 아래 길안내로 확인해 주세요.') + '</div>'
           : (function () { var t = Math.round(st.travel * m[3]), dep = at - t - 10, pr = dep - g.prep;
-              return '<div class="big">' + hm(dep) + '<small>출발</small></div><div class="sub">' + hm(pr) + ' 준비 시작 (' + g.prep + '분) · ' + m[1] + ' 약 ' + t + '분 · ' + inv.s + ' 도착 (여유 10분)<br>' + esc(g.origin.name) + ' → ' + esc(inv.l) + '</div>'; })();
+              return '<div class="big">' + hm(dep) + '<small>출발</small></div><div class="sub">' + hm(pr) + ' 준비 시작 (' + esc(g.prep) + '분) · ' + esc(m[1]) + ' 약 ' + t + '분 · ' + esc(inv.s) + ' 도착 (여유 10분)<br>' + esc(g.origin.name) + ' → ' + esc(inv.l) + '</div>'; })();
         h += '<div class="rs-q" style="margin-bottom:10px">내 출발 시간</div><div class="plan">' + body + nav() + '</div>' +
           '<button class="home" data-r="home2"><span class="i">' + IC.home + '</span><span><b>홈 화면에 추가</b><small>아이콘 누르면 이 초대장이 바로 열려요</small></span></button>' +
           '<button class="again" data-r="reset">출발지·준비 시간 다시 고르기</button>';

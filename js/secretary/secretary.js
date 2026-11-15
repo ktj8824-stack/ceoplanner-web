@@ -619,7 +619,11 @@ const Sec = {
       if (pl) { f.elements.location.value = pl.dataset.pickplace; this.dirty = true; this.syncForm(f, back); }
     });
     back.querySelector('[data-del]')?.addEventListener('click', () => this.deleteFlow(target.id, () => { this.dirty = false; this.edit = null; back.remove(); }));
-    back.querySelector('[data-invite]')?.addEventListener('click', () => this.openInvite(target.id));
+    back.querySelector('[data-invite]')?.addEventListener('click', () => {
+      // 저장 전에 보내면 옛 시각으로 나가므로, 바꾼 내용이 있으면 먼저 저장하게 함
+      if (this.dirty) { U.toast('바꾼 내용을 먼저 저장해 주세요. 저장한 내용으로 초대장이 만들어져요'); return; }
+      this.openInvite(target.id);
+    });
     document.body.appendChild(back);
     this.syncForm(f, back);
     f.title.focus();
