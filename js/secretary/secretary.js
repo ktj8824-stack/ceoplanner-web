@@ -101,16 +101,31 @@ const Sec = {
       <div class="side-foot">
         <a class="side-btn" href="${U.esc(CEOP_CONFIG.APP_URL)}" target="_blank">${Icon.svg('phone', 16)} CEO 앱 열기</a>
         <button class="side-btn" data-accounts>${Icon.svg('user', 16)} 계정 관리</button>
-        <button class="side-btn" data-billing>${Icon.svg('file', 16)} 구독 · 결제<small class="side-sub">${U.esc(Plan.summary())}</small></button>
+        <button class="side-btn" data-billing>${Icon.svg('file', 16)} ${Plan.isFree() ? '이용 안내' : '구독 · 결제'}<small class="side-sub">${U.esc(Plan.summary())}</small></button>
         <a class="side-btn dim" href="privacy.html" target="_blank">개인정보 처리방침</a>
         ${Store.mode === 'demo' ? `<button class="side-btn dim" data-reset>데모 데이터 초기화</button>` : `<button class="side-btn dim" data-logout>로그아웃</button>`}
+        <button class="side-btn dim" data-withdraw>회원 탈퇴</button>
       </div>`;
     el.querySelectorAll('[data-filter]').forEach(b => b.addEventListener('click', () => { this.filter = b.dataset.filter; this.refresh(); }));
     el.querySelector('[data-reset]')?.addEventListener('click', () => { if (confirm('데모 데이터를 처음 상태로 되돌릴까요?')) Store.resetDemo(); });
     el.querySelector('[data-logout]')?.addEventListener('click', () => Store.signOut());
+    el.querySelector('[data-withdraw]')?.addEventListener('click', () => U.withdraw());
     el.querySelector('[data-accounts]').addEventListener('click', () => this.openAccounts());
     document.querySelector('[data-exitdemo]')?.addEventListener('click', () => Store.exitDemo());
     el.querySelector('[data-billing]').addEventListener('click', () => this.openBilling());
+  },
+
+  /** 무료 기간 안내 (결제가 닫혀 있을 때 '구독 · 결제' 대신) */
+  openFreeInfo() {
+    const back = document.createElement('div'); back.className = 'modal-back';
+    back.innerHTML = `<div class="modal free-info" role="dialog" aria-label="이용 안내" style="max-width:460px;width:100%">
+      <div class="ed-head"><div><h3>이용 안내</h3><p class="muted small">${U.esc(Plan.FREE_TEXT)}</p></div><button class="icon-btn" data-close aria-label="닫기">${Icon.svg('x', 18)}</button></div>
+      <div class="ed-body" style="display:block"><p style="margin:0 0 10px"><b>${U.esc(Plan.FREE_TEXT)}</b>로 모든 기능을 쓸 수 있어요.</p>
+        <ul style="margin:0 0 12px;padding-left:18px;line-height:1.7"><li>비서 웹 · 대표 앱 · 기사님 계정</li><li>AI 비서 — 말로 일정 등록 · 변경 · 미루기</li><li>역산 알림 · 동선 확인 · 비서톡 · 손님 초대장</li></ul>
+        <p class="muted small" style="margin:0">무료 기간이 끝나기 전에 요금과 결제 방법을 미리 알려 드려요. 그때까지 결제 정보는 받지 않아요.</p></div>
+      <div class="ed-foot"><button class="btn primary" data-close>확인</button></div></div>`;
+    document.body.appendChild(back);
+    back.addEventListener('click', e => { if (e.target === back || e.target.closest('[data-close]')) back.remove(); });
   },
 
   // ───────── 구독 (끝나면 화면 전체 안내, 얼마 안 남으면 위에 알림 줄) ─────────
@@ -126,6 +141,7 @@ const Sec = {
   },
 
   openBilling() {
+    if (Plan.isFree()) return this.openFreeInfo();
     const s = Plan.state(), P = Plan.PRICES;
     const hist = Store.payments().filter(p => p.status === 'DONE');
     const back = document.createElement('div');
