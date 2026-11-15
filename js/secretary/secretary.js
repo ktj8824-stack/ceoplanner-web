@@ -280,7 +280,7 @@ const Sec = {
     const acked = mine.filter(s => s.ackAt).length;
     const waiting = mine.filter(s => !s.ackAt);
     const warns = this.conflictsOn(U.today());
-    const plans = Backtime.planDay(today, { prepMin: Store.profile().prepMin });
+    const plans = Backtime.planDay(today, { prepMin: Store.profile().prepMin, commuteMin: Store.profile().commuteMin });
     const next = plans.find(({ s, p }) => s.mode !== 'none' && !s.masked && p.leaveAt > now);
     const short = w => `${w.b.title}까지 ${w.shortMin}분 부족`;
     const stat = (label, value, sub, tone, view) => `
@@ -414,7 +414,7 @@ const Sec = {
   /** 당일 동선 — 막대(기사 대기·이동은 빗금) + 현재 시각 선 + 이동 부족 해결 버튼 */
   dayView() {
     const list = this.day(this.cur);
-    const plans = Backtime.planDay(list, { prepMin: Store.profile().prepMin });
+    const plans = Backtime.planDay(list, { prepMin: Store.profile().prepMin, commuteMin: Store.profile().commuteMin });
     const warns = this.conflictsOn(this.cur);
     if (!plans.length) return `<div class="empty-big">${Icon.svg('calendar', 28)}<p>이 날은 일정이 없어요.</p><button class="btn primary" data-newon="${this.cur}">${Icon.svg('plus', 16)} 이 날 일정 등록</button></div>`;
     const now = new Date();
@@ -508,9 +508,9 @@ const Sec = {
   // ───────── 기사님께 배차 알림 ─────────
   openDispatch(ymd) {
     const p = Store.profile();
-    const plans = Backtime.planDay(Store.byDate(ymd).filter(s => s.status !== 'cancelled' && !s.masked), { prepMin: p.prepMin })
+    const plans = Backtime.planDay(Store.byDate(ymd).filter(s => s.status !== 'cancelled' && !s.masked), { prepMin: p.prepMin, commuteMin: p.commuteMin })
       .filter(({ s }) => s.mode === 'driver' || (s.trip && s.trip.accessMode === 'driver'));
-    const lines = plans.map(({ s, p: pl }) => `${U.hm(pl.driverCallAt || pl.leaveAt)} ${U.building(s.origin || this.originFor(s.date, s.start, s.id)) || '본사'} 대기 → ${U.hm(pl.leaveAt)} 출발 · ${s.trip ? (s.trip.station || '역') : (s.location || '')} (${s.start} ${s.title})`);
+    const lines = plans.map(({ s, p: pl }) => `${U.hm(pl.driverCallAt || pl.leaveAt)} ${U.pickupLabel(s.origin || this.originFor(s.date, s.start, s.id)) || '본사'} 대기 → ${U.hm(pl.leaveAt)} 출발 · ${s.trip ? (s.trip.station || '역') : (s.location || '')} (${s.start} ${s.title})`);
     const link = CEOP_CONFIG.DRIVER_URL ? `\n배차표 · 대기/출발/도착 알리기: ${new URL(CEOP_CONFIG.DRIVER_URL, location.href).href}` : '';
     const text = lines.length ? `[${this.dateShort(ymd)} 배차]\n${lines.join('\n')}${link}\n- ${p.secretaryName || '비서'}` : '';
     const back = document.createElement('div');
@@ -619,10 +619,17 @@ const Sec = {
       if (pl) { f.elements.location.value = pl.dataset.pickplace; this.dirty = true; this.syncForm(f, back); }
     });
     back.querySelector('[data-del]')?.addEventListener('click', () => this.deleteFlow(target.id, () => { this.dirty = false; this.edit = null; back.remove(); }));
-    back.querySelector('[data-invite]')?.addEventListener('click', () => {
-      // 저장 전에 보내면 옛 시각으로 나가므로, 바꾼 내용이 있으면 먼저 저장하게 함
-      if (this.dirty) { U.toast('바꾼 내용을 먼저 저장해 주세요. 저장한 내용으로 초대장이 만들어져요'); return; }
-      this.openInvite(target.id);
+    // 고친 내용이 있으면 먼저 저장 — 저장 안 하면 예전 시각으로 초대장이 나가요
+    back.querySelector('[data-invite]')?.addEventListener('click', async () => {
+      if (!this.dirty) return this.openInvite(target.id);
+      if (!confirm('고친 내용을 먼저 저장할까요?\n저장해야 바뀐 시간·장소로 초대장이 나가요.')) return;
+      const sent = this.inviteSent(target.id);
+      if (await this.save(f, { quietInvite: true })) {
+        this.dirty = false; this.edit = null; back.remove();
+        const now = Store.get(target.id);
+        const changed = sent && now && (sent.date !== now.date || sent.start !== now.start || (sent.location || '') !== (now.location || ''));
+        this.openInvite(target.id, changed ? { from: sent } : {});
+      }
     });
     document.body.appendChild(back);
     this.syncForm(f, back);
@@ -677,7 +684,7 @@ const Sec = {
     const box = back.querySelector('#preview');
     if (!s.date || !s.start) { box.innerHTML = ''; return; }
     const others = Store.byDate(s.date).filter(x => x.id !== s.id && x.status !== 'cancelled');
-    const day = Backtime.planDay([...others, s], { prepMin: Store.profile().prepMin });
+    const day = Backtime.planDay([...others, s], { prepMin: Store.profile().prepMin, commuteMin: Store.profile().commuteMin });
     const mine = day.find(d => d.s === s);
     const all = [...Store.list().filter(x => x.id !== s.id), s];
     const warns = [...Backtime.conflictsOn(all, s.date), ...Backtime.conflictsOn(all, U.addDays(s.date, 1))].filter(w => w.a === s || w.b === s);
@@ -695,7 +702,7 @@ const Sec = {
       ${status}`;
   },
 
-  async save(f) {
+  async save(f, opts = {}) {
     const s = this.fromForm(f);
     const need = !s.title ? ['title', '일정 이름을 적어 주세요'] : !s.date ? ['date', '날짜를 골라 주세요'] : !s.start ? ['start', '시작 시간을 골라 주세요'] : !s.end ? ['end', '끝나는 시간을 골라 주세요'] : null;
     if (need) { const el = f.elements[need[0]]; U.toast(need[1]); if (el) { el.classList.add('invalid'); el.focus(); el.addEventListener('input', () => el.classList.remove('invalid'), { once: true }); } return false; }
@@ -717,9 +724,18 @@ const Sec = {
       await Store.upsertMany([s, ...later.map(x => ({ ...x, ...same(s) }))]);
       U.toast(this.edit.id ? `저장했어요${later.length ? ` (이후 반복 ${later.length}건 함께)` : ''}. 대표님께 다시 확인을 요청했어요` : '등록했어요. 대표님 앱에 표시돼요');
       // 시간 · 날짜가 바뀌었으면 상대방에게 보낼 문자 초안
-      if (before && (before.start !== s.start || before.date !== s.date) && s.briefing && s.briefing.who) {
-        setTimeout(() => this.openDraft(s, Drafts.change(s, { date: before.date, start: before.start }, { date: s.date, start: s.start }, Store.profile())), 50);
-      }
+      const needDraft = before && (before.start !== s.start || before.date !== s.date) && s.briefing && s.briefing.who;
+      // 손님께 초대장을 보낸 일정의 시각 · 장소가 바뀌었으면 '바뀐 초대장 보내기'를 바로 (손님 링크는 예전 값 그대로라서)
+      const sent = before && !opts.quietInvite ? this.inviteSent(s.id) : null;
+      const invChanged = sent && (sent.date !== s.date || sent.start !== s.start || (sent.location || '') !== (s.location || ''));
+      if (needDraft || invChanged) setTimeout(() => {
+        const dr = needDraft ? this.openDraft(s, Drafts.change(s, { date: before.date, start: before.start }, { date: s.date, start: s.start }, Store.profile())) : null;
+        if (!invChanged) return;
+        const go = () => this.openInvite(s.id, { from: sent });
+        if (!dr) return go();
+        const ob = new MutationObserver(() => { if (!dr.isConnected) { ob.disconnect(); go(); } });   // 문자 초안을 닫으면 이어서
+        ob.observe(document.body, { childList: true });
+      }, 50);
       return true;
     } catch (err) { U.toast('저장하지 못했어요: ' + (err.message || err)); return false; }
   },
@@ -760,32 +776,35 @@ const Sec = {
   /** 삭제: 반복 일정이면 '이 일정만 / 이후 모두' 고르기, 만날 분이 있으면 취소 문자 초안 */
   /** 손님용 미팅 초대장: 링크 안에 미팅 정보만 (서버 저장 없음). 받은 사람은 출발지·준비 시간·이동 수단만 고르면 출발 시간이 나옴 */
   INVITE_BASE: 'https://ktj8824-stack.github.io/ceoplanner-web/invite.html',
-  openInvite(id) {
+  openInvite(id, opts = {}) {
     const s = Store.get(id); if (!s) return;
-    let co = ''; try { co = localStorage.getItem('ceo_company_name') || ''; } catch { /* */ }
+    let co = '', note = ''; try { co = localStorage.getItem('ceo_company_name') || ''; note = localStorage.getItem('ceo_inv_note_' + id) || ''; } catch { /* */ }
+    const from = opts.from;
+    const diff = from ? [from.date !== s.date || from.start !== s.start ? (from.date === s.date ? `시간 ${this.dateShort(s.date)} ${from.start} → ${s.start}` : `시간 ${this.dateShort(from.date)} ${from.start} → ${this.dateShort(s.date)} ${s.start}`) : '', (from.location || '') !== (s.location || '') ? `장소 ${from.location || '-'} → ${s.location || '-'}` : ''].filter(Boolean).join(' · ') : '';
     const back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML = `<div class="modal dispatch" role="dialog" aria-label="손님에게 초대장 보내기">
       <div class="ed-head"><div><h3>손님에게 초대장 보내기</h3><p class="muted small">${U.esc(s.title)} · ${this.dateShort(s.date)} ${U.esc(s.start)}</p></div>
         <button class="icon-btn" data-close aria-label="닫기">${Icon.svg('x', 18)}</button></div>
       <div class="dp-body">
+        ${diff ? `<p class="inv-changed">${Icon.svg('alert', 15)} <span>손님께 보낸 초대장과 달라졌어요 — ${U.esc(diff)}.<br>바뀐 초대장을 다시 보내 주세요.</span></p>` : ''}
         <p class="muted small" style="margin:0 0 10px">손님은 로그인·설치 없이 링크를 열어 출발지만 고르면 출발 시간과 길안내가 나와요. 미팅 이름·날짜·시각·장소만 보내요.</p>
         <label class="dp-text">회사 이름 (초대장 맨 위)<input id="inv-co" value="${U.esc(co)}" placeholder="예) 한빛전자"></label>
-        <label class="dp-text">손님께 한마디 <span class="muted">(선택)</span><input id="inv-note" placeholder="예) 1층 안내데스크에서 방문증 받아 주세요"></label>
+        <label class="dp-text">손님께 한마디 <span class="muted">(선택)</span><input id="inv-note" value="${U.esc(note)}" placeholder="예) 1층 안내데스크에서 방문증 받아 주세요"></label>
         <label class="dp-text">보낼 글<textarea id="inv-msg" rows="8" readonly></textarea></label>
       </div>
       <div class="ed-foot"><span style="flex:1"></span><button class="btn" data-close>닫기</button><button class="btn" data-copy>복사</button><button class="btn primary" data-send>보내기 (카톡 등)</button></div></div>`;
     document.body.appendChild(back);
     const build = () => {
       const c = back.querySelector('#inv-co').value.trim(), n = back.querySelector('#inv-note').value.trim();
-      try { localStorage.setItem('ceo_company_name', c); } catch { /* */ }
+      try { localStorage.setItem('ceo_company_name', c); localStorage.setItem('ceo_inv_note_' + id, n); } catch { /* */ }
       const o = { v: 1, id: String(s.id).slice(0, 12), c, t: s.title, d: s.date, s: s.start, l: s.location || '' };
       if (n) o.n = n.slice(0, 120);
       const bin = Array.from(new TextEncoder().encode(JSON.stringify(o)), x => String.fromCharCode(x)).join('');
       const url = this.INVITE_BASE + '?i=' + btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       const dt = new Date(s.date + 'T00:00:00');
       const when = `${dt.getMonth() + 1}월 ${dt.getDate()}일 (${'일월화수목금토'[dt.getDay()]}) ${s.start}`;
-      const text = `💼 ${c ? `[${c}] ` : ''}미팅 초대\n▪ 일정  ${s.title}\n▪ 장소  ${s.location || '-'}\n▪ 일시  ${when}\n출발지만 고르면 출발 시간·길안내가 맞춰져요\n\n▶ 눌러서 받기\n${url}`;
+      const text = (diff ? `⚠ 변경 안내 — ${diff}\n` : '') + `💼 ${c ? `[${c}] ` : ''}미팅 초대\n▪ 일정  ${s.title}\n▪ 장소  ${s.location || '-'}\n▪ 일시  ${when}\n출발지만 고르면 출발 시간·길안내가 맞춰져요\n\n▶ 눌러서 받기\n${url}`;
       back.querySelector('#inv-msg').value = text;
       return { text, url };
     };
@@ -793,6 +812,7 @@ const Sec = {
     back.querySelectorAll('input').forEach(i => i.addEventListener('input', build));
     back.addEventListener('click', async e => {
       if (e.target === back || e.target.closest('[data-close]')) return back.remove();
+      if (e.target.closest('[data-copy], [data-send]')) { try { localStorage.setItem('ceo_inv_sent_' + id, JSON.stringify({ date: s.date, start: s.start, location: s.location || '', at: Date.now() })); } catch { /* */ } }
       if (e.target.closest('[data-copy]')) { const { text } = build(); try { await navigator.clipboard.writeText(text); U.toast('복사했어요. 카톡에 붙여넣어 보내 주세요'); } catch { prompt('길게 눌러 복사하세요', text); } }
       if (e.target.closest('[data-send]')) { const { text } = build(); if (navigator.share) { try { await navigator.share({ text }); } catch { /* */ } } else { try { await navigator.clipboard.writeText(text); U.toast('복사했어요. 카톡에 붙여넣어 보내 주세요'); } catch { prompt('길게 눌러 복사하세요', text); } } }
     });
@@ -837,7 +857,11 @@ const Sec = {
     const upd = () => { sms.href = `sms:${ph.value.replace(/[^0-9+]/g, '')}?body=${encodeURIComponent(ta.value)}`; };
     upd(); ta.addEventListener('input', upd); ph.addEventListener('input', upd);
     back.querySelector('[data-copy]').addEventListener('click', async () => { try { await navigator.clipboard.writeText(ta.value); U.toast('복사했어요'); } catch { U.toast('복사하지 못했어요. 직접 선택해 복사해 주세요'); } });
+    return back;
   },
+
+  /** 손님께 마지막으로 보낸 초대장 내용 (이 브라우저 기준) */
+  inviteSent(id) { try { return JSON.parse(localStorage.getItem('ceo_inv_sent_' + id) || 'null'); } catch { return null; } },
 
   /** 대표님 메시지(시간 변경 · 취소)에서 상대방 문자 초안 만들기 */
   draftFromMsg(m) {
@@ -855,7 +879,7 @@ const Sec = {
   /** 대표님께 보낼 하루 브리핑 */
   briefText(ymd) {
     const p = Store.profile();
-    const day = Backtime.planDay(Store.byDate(ymd).filter(s => s.status !== 'cancelled'), { prepMin: p.prepMin });
+    const day = Backtime.planDay(Store.byDate(ymd).filter(s => s.status !== 'cancelled'), { prepMin: p.prepMin, commuteMin: p.commuteMin });
     if (!day.length) return '';
     const first = day.find(({ s }) => s.mode && s.mode !== 'none');
     const pending = day.filter(({ s }) => !s.masked && !s.ackAt).length;
