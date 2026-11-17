@@ -135,7 +135,7 @@ const Sec = {
     lock.hidden = s.active;
     if (!s.active) { lock.innerHTML = Plan.lockHtml(); Plan.bindLock(lock); }
     const bar = document.getElementById('planbar');
-    const soon = s.active && ((s.plan === 'trial' && s.daysLeft <= 3) || (s.plan !== 'trial' && s.daysLeft <= 5));
+    const soon = s.active && s.plan !== 'free' && ((s.plan === 'trial' && s.daysLeft <= 3) || (s.plan !== 'trial' && s.daysLeft <= 5));
     bar.innerHTML = soon ? `<div class="plan-bar">${Icon.svg('bell', 18)}<span>${s.plan === 'trial' ? `무료 체험이 <b>${s.daysLeft}일</b> 남았어요.` : `이용 기간이 <b>${s.daysLeft}일</b> 남았어요 (${Plan.untilText(s.until)}까지).`} 끊기지 않게 미리 결제해 주세요.</span>
       <a class="btn sm primary" href="${U.esc(Plan.payUrl())}">결제하기</a></div>` : '';
   },
@@ -652,10 +652,19 @@ const Sec = {
     f.title.focus();
   },
 
-  /** 출발지 기본값 — 이 일정 시작 전에 끝나는 마지막 일정 장소, 없으면 본사 */
+  /** 출발지 기본값 — 이 일정 시작 전에 끝나는 마지막 일정 장소, 없으면 본사.
+   *  앞 일정이 끝나고 3시간 넘게 비면 그 사이 다른 곳(대개 자택)으로 갔다고 보고 앞 장소를 쓰지 않아요 */
   originFor(d, start, exceptId) {
-    const prev = Store.byDate(d).filter(x => !x.masked && x.location && x.status !== 'cancelled' && x.id !== exceptId && (x.end || x.start) <= start && x.start <= start).pop();
+    const prev = this.prevFor(d, start, exceptId);
+    if (prev && this.gapMin(prev, start) > 180) return '자택';
     return prev ? prev.location : '본사';
+  },
+  prevFor(d, start, exceptId) {
+    return Store.byDate(d).filter(x => !x.masked && x.location && x.status !== 'cancelled' && x.id !== exceptId && (x.end || x.start) <= start && x.start <= start).pop();
+  },
+  gapMin(prev, start) {
+    const m = t => { const [h, mi] = String(t || '0:0').split(':').map(Number); return h * 60 + mi; };
+    return m(start) - m(prev.end || prev.start);
   },
 
   /** 새 일정 기본값 */
@@ -707,10 +716,12 @@ const Sec = {
     if (mine.p.warn) warns.unshift({ msg: mine.p.warn });
     const go = s.mode !== 'none';
     const past = s.date && s.start && U.at(s.date, s.start) < new Date() && !(this.edit && this.edit.id) ? `<p class="pv-status">${Icon.svg('info', 15)} 이미 지난 시각이에요 — 기록용이면 그대로 저장하세요 (대표님 확인 대기에는 안 들어가요)</p>` : '';
+    const prevS = this.prevFor(s.date, s.start, s.id);
+    const gapNote = prevS && this.gapMin(prevS, s.start) > 180 && s.origin !== prevS.location ? `<p class="pv-status">${Icon.svg('info', 15)} 앞 일정(${U.esc(prevS.location)})이 ${U.esc(prevS.end || prevS.start)}에 끝나고 시간이 많이 비어요 — 출발지(${U.esc(s.origin || '본사')})가 맞는지 확인해 주세요</p>` : '';
     const overnight = s.end && s.end < s.start ? `<p class="pv-status">${Icon.svg('clock', 15)} 다음 날 ${s.end}에 끝나는 일정으로 저장돼요</p>` : '';
     // 새 일정을 막 열었을 때(아직 아무것도 안 고침)는 경고 대신 안내 — 처음 쓰는 분이 놀라지 않게
     const fresh = !(this.edit && this.edit.id) && !this.dirty;
-    const status = fresh ? `<p class="pv-status">${Icon.svg('info', 15)} 날짜 · 시간 · 장소를 정하면 앞뒤 일정과 겹치는지 바로 알려 드려요</p>` : past + overnight + (warns.length ? warns.map(w => `<p class="pv-status bad">${Icon.svg('alert', 15)} ${U.esc(w.msg)}</p>`).join('')
+    const status = fresh ? `<p class="pv-status">${Icon.svg('info', 15)} 날짜 · 시간 · 장소를 정하면 앞뒤 일정과 겹치는지 바로 알려 드려요</p>` : past + gapNote + overnight + (warns.length ? warns.map(w => `<p class="pv-status bad">${Icon.svg('alert', 15)} ${U.esc(w.msg)}</p>`).join('')
       : `<p class="pv-status ok">${Icon.svg('checkCircle', 15)} 같은 날 앞뒤 일정과 겹치지 않아요${s.mode === 'driver' ? ` · ${U.esc(Store.profile().driverName || '기사님')} 배차 가능` : ''}</p>`);
     box.innerHTML = `<span class="pv-cap">대표님 앱에 이렇게 보여요</span>
       ${go ? `<span class="pv-cap">출발</span><b class="pv-big num">${U.hm(mine.p.leaveAt)}</b>` : `<span class="pv-cap">시작</span><b class="pv-big num">${s.start}</b>`}
