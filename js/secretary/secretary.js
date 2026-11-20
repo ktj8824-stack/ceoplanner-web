@@ -83,7 +83,7 @@ const Sec = {
   // ───────── 사이드바 ─────────
   renderSide() {
     const p = Store.profile();
-    const upcoming = Store.list().filter(s => !s.masked && s.date >= U.today() && s.date <= U.addDays(U.today(), 30));
+    const upcoming = Store.list().filter(s => !s.masked && s.status !== 'cancelled' && s.date >= U.today() && s.date <= U.addDays(U.today(), 30));
     const cats = Object.entries(Backtime.CATEGORIES).filter(([k]) => k !== 'personal');
     const item = (key, label, count, color) => `
       <button class="side-item ${this.filter === key ? 'on' : ''}" data-filter="${key}">
@@ -522,13 +522,13 @@ const Sec = {
   },
 
   // ───────── 기사님께 배차 알림 ─────────
-  openDispatch(ymd) {
+  openDispatch(ymd, note = '') {
     const p = Store.profile();
     const plans = Backtime.planDay(Store.byDate(ymd).filter(s => s.status !== 'cancelled' && !s.masked), { prepMin: p.prepMin, commuteMin: p.commuteMin })
       .filter(({ s }) => s.mode === 'driver' || (s.trip && s.trip.accessMode === 'driver'));
     const lines = plans.map(({ s, p: pl }) => `${U.hm(pl.driverCallAt || pl.leaveAt)} ${U.pickupLabel(s.origin || this.originFor(s.date, s.start, s.id)) || '본사'} 대기 → ${U.hm(pl.leaveAt)} 출발 · ${s.trip ? (s.trip.station || '역') : (s.location || '')} (${s.start} ${s.title})`);
     const link = CEOP_CONFIG.DRIVER_URL ? `\n배차표 · 대기/출발/도착 알리기: ${new URL(CEOP_CONFIG.DRIVER_URL, location.href).href}` : '';
-    const text = lines.length ? `[${this.dateShort(ymd)} 배차]\n${lines.join('\n')}${link}\n- ${p.secretaryName || '비서'}` : '';
+    const text = lines.length ? `${note ? `⚠ ${note}\n` : ''}[${this.dateShort(ymd)} 배차]\n${lines.join('\n')}${link}\n- ${p.secretaryName || '비서'}` : '';
     const back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML = `<div class="modal dispatch" role="dialog" aria-label="기사님께 배차 알림">
@@ -547,6 +547,7 @@ const Sec = {
       upd(); back.querySelector('#dpText').addEventListener('input', upd);
       back.querySelector('[data-copy]').addEventListener('click', async () => { try { await navigator.clipboard.writeText(back.querySelector('#dpText').value); U.toast('복사했어요'); } catch { U.toast('복사하지 못했어요. 직접 선택해 복사해 주세요'); } });
     }
+    return back;
   },
 
   // ───────── 일정 등록·수정 모달 ─────────
@@ -755,16 +756,42 @@ const Sec = {
       // 손님께 초대장을 보낸 일정의 시각 · 장소가 바뀌었으면 '바뀐 초대장 보내기'를 바로 (손님 링크는 예전 값 그대로라서)
       const sent = before && !opts.quietInvite ? this.inviteSent(s.id) : null;
       const invChanged = sent && (sent.date !== s.date || sent.start !== s.start || (sent.location || '') !== (s.location || ''));
-      if (needDraft || invChanged) setTimeout(() => {
-        const dr = needDraft ? this.openDraft(s, Drafts.change(s, { date: before.date, start: before.start }, { date: s.date, start: s.start }, Store.profile())) : null;
-        if (!invChanged) return;
-        const go = () => this.openInvite(s.id, { from: sent });
-        if (!dr) return go();
-        const ob = new MutationObserver(() => { if (!dr.isConnected) { ob.disconnect(); go(); } });   // 문자 초안을 닫으면 이어서
-        ob.observe(document.body, { childList: true });
-      }, 50);
+      // 오늘 · 내일 일정의 시각 · 장소 · 출발지가 바뀌면 대표님 비서톡에 바로 알림 (이미 출발했을 수 있어요 · 오늘이면 긴급 → 대표 앱 알림)
+      const ch = before ? this.changeNote(before, s) : '';
+      const soon = before && [before.date, s.date].some(d => d === U.today() || d === U.addDays(U.today(), 1));
+      if (ch && soon) await Store.send(`'${s.title}' 일정이 바뀌었어요: ${ch}`, { ref: s.id, urgent: [before.date, s.date].includes(U.today()) }).catch(() => U.toast('저장했지만 대표님께 알림을 보내지 못했어요'));
+      // 기사 차량 일정의 대기 장소(출발지) · 시각이 바뀌면 기사님께 보낼 변경 문자를 이어서 (기사님 배차표도 '픽업 장소 바뀜'으로 표시)
+      const byDriver = x => x.mode === 'driver' || (x.trip && x.trip.accessMode === 'driver');
+      const drvNote = before && soon && (byDriver(before) || byDriver(s)) && ((before.origin || '') !== (s.origin || '') || before.start !== s.start || before.date !== s.date)
+        ? `변경 · '${s.title}' ${[(before.origin || '') !== (s.origin || '') ? `대기 장소 ${U.pickupLabel(this.originOf(before))} → ${U.pickupLabel(this.originOf(s))}` : '', before.start !== s.start || before.date !== s.date ? `시간 ${before.date !== s.date ? this.dateShort(before.date) + ' ' : ''}${before.start} → ${before.date !== s.date ? this.dateShort(s.date) + ' ' : ''}${s.start}` : ''].filter(Boolean).join(' · ')}` : '';
+      const steps = [];
+      if (needDraft) steps.push(() => this.openDraft(s, Drafts.change(s, { date: before.date, start: before.start }, { date: s.date, start: s.start }, Store.profile())));
+      if (invChanged) steps.push(() => this.openInvite(s.id, { from: sent }));
+      if (drvNote) steps.push(() => this.openDispatch(s.date, drvNote));
+      if (steps.length) setTimeout(() => this.chain(steps), 50);
       return true;
     } catch (err) { U.toast('저장하지 못했어요: ' + (err.message || err)); return false; }
+  },
+
+  /** 창을 하나씩 차례로 (앞 창을 닫으면 다음 창) */
+  chain(steps) {
+    const el = steps.shift()();
+    if (!steps.length) return;
+    if (!el) return this.chain(steps);
+    const ob = new MutationObserver(() => { if (!el.isConnected) { ob.disconnect(); this.chain(steps); } });
+    ob.observe(document.body, { childList: true });
+  },
+
+  /** 출발지 칸이 비면 화면처럼 앞 일정 장소(없으면 본사) */
+  originOf(x) { return x.origin || this.originFor(x.date, x.start, x.id); },
+
+  /** 시각 · 장소 · 출발지가 어떻게 바뀌었는지 한 줄 ('15:00 → 15:30 · 장소 A → B') — 안 바뀌었으면 '' */
+  changeNote(a, b) {
+    return [
+      a.date !== b.date || a.start !== b.start ? `${a.date !== b.date ? this.dateShort(a.date) + ' ' : ''}${a.start} → ${a.date !== b.date ? this.dateShort(b.date) + ' ' : ''}${b.start}` : '',
+      (a.location || '') !== (b.location || '') ? `장소 ${a.location || '-'} → ${b.location || '-'}` : '',
+      (a.origin || '') !== (b.origin || '') ? `출발지 ${this.originOf(a)} → ${this.originOf(b)}` : '',
+    ].filter(Boolean).join(' · ');
   },
 
   /** 등록 창 도우미: 배운 이동 시간 · 식사 장소 추천 · 반복 안내 */
@@ -839,23 +866,35 @@ const Sec = {
     back.querySelectorAll('input').forEach(i => i.addEventListener('input', build));
     back.addEventListener('click', async e => {
       if (e.target === back || e.target.closest('[data-close]')) return back.remove();
-      if (e.target.closest('[data-copy], [data-send]')) { try { localStorage.setItem('ceo_inv_sent_' + id, JSON.stringify({ date: s.date, start: s.start, location: s.location || '', at: Date.now() })); } catch { /* */ } }
+      if (e.target.closest('[data-copy], [data-send]')) {
+        const rec = { date: s.date, start: s.start, location: s.location || '', at: Date.now() };
+        try { localStorage.setItem('ceo_inv_sent_' + id, JSON.stringify(rec)); } catch { /* */ }
+        // 일정에도 남겨 다른 PC · 다른 비서도 '보낸 초대장'을 알게 (실제 기록 칸이라 대표님 확인은 다시 안 받아요)
+        Store.setActual(id, { invited: rec }).catch(() => { /* 이 PC 기록은 남음 */ });
+      }
       if (e.target.closest('[data-copy]')) { const { text } = build(); try { await navigator.clipboard.writeText(text); U.toast('복사했어요. 카톡에 붙여넣어 보내 주세요'); } catch { prompt('길게 눌러 복사하세요', text); } }
       if (e.target.closest('[data-send]')) { const { text } = build(); if (navigator.share) { try { await navigator.share({ text }); } catch { /* */ } } else { try { await navigator.clipboard.writeText(text); U.toast('복사했어요. 카톡에 붙여넣어 보내 주세요'); } catch { prompt('길게 눌러 복사하세요', text); } } }
     });
+    return back;
   },
 
   deleteFlow(id, done) {
     const s = Store.get(id); if (!s) return;
     const later = s.series ? Store.list().filter(x => x.series === s.series && x.date > s.date && x.status !== 'cancelled') : [];
+    // 오늘 · 내일 아직 안 끝난 일정은 지우지 않고 '취소'로 남겨요 → 대표님 비서톡 알림 · 기사님 배차표 '취소됨'
+    const live = x => (x.date === U.today() || x.date === U.addDays(U.today(), 1)) && U.at(x.date, x.end || x.start) > new Date();
     const finish = async ids => {
       try {
-        await Store.removeMany(ids); done && done();
-        U.toast(ids.length > 1 ? `일정 ${ids.length}건을 삭제했어요` : '일정을 삭제했어요');
+        const all = ids.map(i => Store.get(i)).filter(Boolean), off = all.filter(live);
+        if (off.length) await Store.upsertMany(off.map(x => ({ ...x, status: 'cancelled' })));
+        await Store.removeMany(all.filter(x => !live(x)).map(x => x.id));
+        for (const x of off) await Store.send(`'${x.title}'(${x.date === U.today() ? '오늘' : '내일'} ${x.start}) 일정이 취소됐어요.${x.mode === 'driver' || (x.trip && x.trip.accessMode === 'driver') ? ' 기사님 배차표에도 \'취소됨\'으로 보여요.' : ''}`, { ref: x.id, urgent: x.date === U.today() });
+        done && done();
+        U.toast(off.length ? `취소했어요. 대표님${off.some(x => x.mode === 'driver' || (x.trip && x.trip.accessMode === 'driver')) ? '·기사님' : ''}께 알렸어요` : ids.length > 1 ? `일정 ${ids.length}건을 삭제했어요` : '일정을 삭제했어요');
         if (s.briefing && s.briefing.who && U.at(s.date, s.start) > new Date()) setTimeout(() => this.openDraft(s, Drafts.cancel(s, Store.profile())), 50);
       } catch (err) { U.toast('삭제하지 못했어요: ' + (err.message || err)); }
     };
-    if (!later.length) { if (confirm('이 일정을 삭제할까요? 대표님 앱에서도 사라져요.')) finish([id]); return; }
+    if (!later.length) { if (confirm(live(s) ? '이 일정을 취소할까요? 대표님·기사님께 취소를 알려요.' : '이 일정을 삭제할까요? 대표님 앱에서도 사라져요.')) finish([id]); return; }
     const back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML = `<div class="modal choice" role="dialog" aria-label="반복 일정 삭제"><h3>반복 일정이에요</h3>
@@ -887,8 +926,12 @@ const Sec = {
     return back;
   },
 
-  /** 손님께 마지막으로 보낸 초대장 내용 (이 브라우저 기준) */
-  inviteSent(id) { try { return JSON.parse(localStorage.getItem('ceo_inv_sent_' + id) || 'null'); } catch { return null; } },
+  /** 손님께 마지막으로 보낸 초대장 내용 (이 브라우저 기록 + 일정에 남은 기록 중 최근 것) */
+  inviteSent(id) {
+    let mine = null; try { mine = JSON.parse(localStorage.getItem('ceo_inv_sent_' + id) || 'null'); } catch { /* */ }
+    const s = Store.get(id), shared = s && s.actual && s.actual.invited;   // 다른 PC · 다른 비서가 보낸 기록
+    return [mine, shared].filter(Boolean).sort((a, b) => (b.at || 0) - (a.at || 0))[0] || null;
+  },
 
   /** 대표님 메시지(시간 변경 · 취소)에서 상대방 문자 초안 만들기 */
   draftFromMsg(m) {
