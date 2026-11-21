@@ -282,7 +282,15 @@ const Sec = {
       rows.push(`<div class="alert-band brief">${Icon.svg('file', 18)}<span><b>내일 브리핑을 아직 안 보냈어요</b><small>내일 일정 ${tomorrow.length}건 · 보내면 대표님 앱에 '모두 확인'이 떠요</small></span>
         <button class="btn primary" data-briefnow>브리핑 보내기</button><button class="btn quiet" data-briefskip>오늘은 안 보내기</button></div>`);
     }
+    // 손님께 초대장을 보낸 뒤 시각 · 장소가 바뀐 일정 (누가 · 어디서 바꿨든 — 비서 웹 · 대표 앱 AI · 다른 PC)
+    for (const s of Store.list()) {
+      if (s.date < U.today() || U.at(s.date, s.start) < now) continue;
+      const sent = this.inviteStale(s); if (!sent) continue;
+      rows.push(`<div class="alert-band brief inv">${Icon.svg('alert', 18)}<span><b>'${U.esc(s.title)}' 손님 초대장이 예전 내용이에요</b><small>${U.esc(this.inviteDiff(sent, s).join(' · '))} · 손님은 아직 예전 링크를 갖고 있어요</small></span>
+        <button class="btn primary" data-reinvite="${s.id}">손님에게 바뀐 초대장 다시 보내기</button></div>`);
+    }
     el.innerHTML = rows.join('');
+    el.querySelectorAll('[data-reinvite]').forEach(b => b.addEventListener('click', () => { const x = Store.get(b.dataset.reinvite); if (x) this.openInvite(x.id, { from: this.inviteStale(x) }); }));
     el.querySelectorAll('[data-latedraft]').forEach(b => b.addEventListener('click', () => { const s = Store.get(b.dataset.latedraft); if (s) this.openDraft(s, Drafts.late(s, b.dataset.min, Store.profile())); }));
     el.querySelector('[data-briefnow]')?.addEventListener('click', () => this.openBrief(t1));
     el.querySelector('[data-briefskip]')?.addEventListener('click', () => { try { localStorage.setItem('CEOP_BRIEF_SKIP', t1); } catch { /* */ } this.renderAlerts(); });
@@ -487,7 +495,11 @@ const Sec = {
       await Store.upsert({ ...s, start: to, end });
       await Store.send(`'${s.title}' 시작을 ${to}${this.ro(to)} 미뤘어요. 앱에서 확인 부탁드려요.`, { ref: s.id });
       U.toast(`${to}${this.ro(to)} 미뤘어요. 대표님께 알렸어요`);
-      if (s.briefing && s.briefing.who) this.openDraft(s, Drafts.change(s, { date: s.date, start: s.start }, { date: s.date, start: to }, Store.profile()));
+      const steps = [];
+      const sent = this.inviteStale(Store.get(id));
+      if (sent) steps.push(() => this.openInvite(id, { from: sent }));
+      if (s.briefing && s.briefing.who) steps.push(() => this.openDraft(s, Drafts.change(s, { date: s.date, start: s.start }, { date: s.date, start: to }, Store.profile())));
+      if (steps.length) this.chain(steps);
     } catch (err) { U.toast('바꾸지 못했어요: ' + (err.message || err)); }
   },
 
@@ -594,6 +606,9 @@ const Sec = {
           <label>역까지 (분)<input name="accessMin" type="number" min="0" max="300" value="${Number(t.accessMin || 0)}"></label>
           <label>역까지 수단<select name="accessMode">${opt({ driver: Backtime.MODES.driver, taxi: Backtime.MODES.taxi, car: Backtime.MODES.car }, t.accessMode || 'driver')}</select></label>
           <label>국제선<select name="intl"><option value="">아니오</option><option value="1" ${t.intl ? 'selected' : ''}>예</option></select></label>
+          <label class="check pk-on"><input type="checkbox" name="pickupOn" ${t.pickup && t.pickup.on ? 'checked' : ''}> 도착지 마중 <span class="muted small">— 도착하면 기사님이 마중 장소에서 대기 (배차표에 자동으로 들어가요)</span></label>
+          <label class="pk">짐 찾는 시간 (분)<input name="pickupBag" type="number" min="0" max="180" value="${t.pickup && t.pickup.bagMin != null ? Number(t.pickup.bagMin) : Backtime.pickupBagDefault(s.mode, t.intl)}" ${t.pickup && t.pickup.bagMin != null ? '' : 'data-auto="1"'}></label>
+          <label class="pk pk-spot">마중 장소<input name="pickupSpot" value="${U.esc((t.pickup && t.pickup.spot) || '')}" placeholder="예: T2 3층 출구"></label>
         </fieldset>
         <details class="full brief" ${hasBrief ? 'open' : ''}><summary>미팅 브리핑 (선택) · 대표님 앱에 일정 직전 표시</summary>
           <div class="brief-grid">
@@ -609,7 +624,7 @@ const Sec = {
       </form>
       <aside class="ed-preview" id="preview"></aside>
       </div>
-      <div class="ed-foot">${target.id ? '<button type="button" class="btn quiet" data-del>일정 삭제</button>' : ''}${target.id && s.category !== 'personal' && U.at(s.date, s.start) > new Date() ? '<button type="button" class="btn" data-invite>손님에게 초대장 보내기</button>' : ''}<span style="flex:1"></span>
+      <div class="ed-foot">${target.id ? '<button type="button" class="btn quiet" data-del>일정 삭제</button>' : ''}${target.id && s.category !== 'personal' && U.at(s.date, s.start) > new Date() ? `<button type="button" class="btn ${this.inviteStale(s) ? 'signal' : ''}" data-invite>${this.inviteStale(s) ? '손님에게 바뀐 초대장 다시 보내기' : '손님에게 초대장 보내기'}</button>` : ''}<span style="flex:1"></span>
         <button type="button" class="btn" data-close>취소</button><button class="btn primary" form="ef">${target.id ? '저장하고 다시 확인 요청' : '등록하고 대표님께 보내기'}</button></div>
     </div>`;
     const close = () => { if (this.dirty && !confirm('저장하지 않은 내용이 있어요. 닫을까요?')) return; this.edit = null; this.dirty = false; back.remove(); };
@@ -625,6 +640,7 @@ const Sec = {
     f.elements.origin && f.elements.origin.addEventListener('input', () => { originTouched = true; });
     const reOrigin = e => { if (!originTouched && f.elements.origin && ['date', 'start'].includes(e.target.name)) f.elements.origin.value = this.originFor(f.elements.date.value, f.elements.start.value, this.edit && this.edit.id); };
     f.addEventListener('change', reOrigin);
+    f.elements.pickupBag && f.elements.pickupBag.addEventListener('input', e => { delete e.target.dataset.auto; });
     f.addEventListener('input', () => { this.dirty = true; this.syncForm(f, back); });
     f.addEventListener('change', () => this.syncForm(f, back));
     f.addEventListener('submit', async e => { e.preventDefault(); if (await this.save(f)) { this.dirty = false; this.edit = null; back.remove(); } });
@@ -638,7 +654,7 @@ const Sec = {
     back.querySelector('[data-del]')?.addEventListener('click', () => this.deleteFlow(target.id, () => { this.dirty = false; this.edit = null; back.remove(); }));
     // 고친 내용이 있으면 먼저 저장 — 저장 안 하면 예전 시각으로 초대장이 나가요
     back.querySelector('[data-invite]')?.addEventListener('click', async () => {
-      if (!this.dirty) return this.openInvite(target.id);
+      if (!this.dirty) { const st = this.inviteStale(Store.get(target.id)); return this.openInvite(target.id, st ? { from: st } : {}); }
       if (!confirm('고친 내용을 먼저 저장할까요?\n저장해야 바뀐 시간·장소로 초대장이 나가요.')) return;
       const sent = this.inviteSent(target.id);
       if (await this.save(f, { quietInvite: true })) {
@@ -690,7 +706,8 @@ const Sec = {
       location: v('location').trim(), origin: v('origin').trim(), mode, travelMin: Number(v('travelMin')) || 0, bufferMin: Number(v('bufferMin')) || 0,
       visibility: 'normal', status: (id && Store.get(id) && Store.get(id).status) || 'scheduled',
       briefing: { who: v('who').trim(), company: v('company').trim(), purpose: v('purpose').trim(), last: v('last').trim(), notes: v('notes').trim(), bring: v('bring').trim(), phone: v('phone').trim() },
-      trip: Backtime.isTrip(mode) ? { station: v('station').trim(), departTime: v('departTime'), arriveTime: v('arriveTime'), accessMin: Number(v('accessMin')) || 0, accessMode: v('accessMode'), intl: !!v('intl') } : null,
+      trip: Backtime.isTrip(mode) ? { station: v('station').trim(), departTime: v('departTime'), arriveTime: v('arriveTime'), accessMin: Number(v('accessMin')) || 0, accessMode: v('accessMode'), intl: !!v('intl'),
+        pickup: f.elements.pickupOn && f.elements.pickupOn.checked ? { on: true, bagMin: v('pickupBag') === '' ? Backtime.pickupBagDefault(mode, !!v('intl')) : Number(v('pickupBag')), spot: v('pickupSpot').trim() } : null } : null,
     };
     if (id) s.id = id;
     return s;
@@ -700,6 +717,10 @@ const Sec = {
     const mode = f.elements.mode.value;
     const s = this.fromForm(f);
     back.querySelector('#tripBox').style.display = Backtime.isTrip(mode) ? '' : 'none';
+    // 도착지 마중: 켰을 때만 짐 시간 · 마중 장소 · 짐 시간은 직접 고치기 전까지 국제선 40분 / 국내선 20분 / KTX 10분
+    const bag = f.elements.pickupBag;
+    if (bag && bag.dataset.auto) bag.value = Backtime.pickupBagDefault(mode, !!f.elements.intl.value);
+    back.querySelectorAll('#tripBox .pk').forEach(el => { el.style.display = f.elements.pickupOn && f.elements.pickupOn.checked ? '' : 'none'; });
     back.querySelectorAll('.mv').forEach(el => { el.style.display = mode === 'none' ? 'none' : ''; });
     back.querySelector('#travelLbl').textContent = Backtime.isTrip(mode) ? '도착역 → 현장 (분)' : '이동 시간 (분)';
     back.querySelector('#startLbl').textContent = s.category === 'golf' ? '티오프' : '시작';
@@ -754,8 +775,8 @@ const Sec = {
       // 시간 · 날짜가 바뀌었으면 상대방에게 보낼 문자 초안
       const needDraft = before && (before.start !== s.start || before.date !== s.date) && s.briefing && s.briefing.who;
       // 손님께 초대장을 보낸 일정의 시각 · 장소가 바뀌었으면 '바뀐 초대장 보내기'를 바로 (손님 링크는 예전 값 그대로라서)
-      const sent = before && !opts.quietInvite ? this.inviteSent(s.id) : null;
-      const invChanged = sent && (sent.date !== s.date || sent.start !== s.start || (sent.location || '') !== (s.location || ''));
+      const sent = before && !opts.quietInvite ? this.inviteStale(s) : null;
+      const invChanged = !!sent;
       // 오늘 · 내일 일정의 시각 · 장소 · 출발지가 바뀌면 대표님 비서톡에 바로 알림 (이미 출발했을 수 있어요 · 오늘이면 긴급 → 대표 앱 알림)
       const ch = before ? this.changeNote(before, s) : '';
       const soon = before && [before.date, s.date].some(d => d === U.today() || d === U.addDays(U.today(), 1));
@@ -765,8 +786,9 @@ const Sec = {
       const drvNote = before && soon && (byDriver(before) || byDriver(s)) && ((before.origin || '') !== (s.origin || '') || before.start !== s.start || before.date !== s.date)
         ? `변경 · '${s.title}' ${[(before.origin || '') !== (s.origin || '') ? `대기 장소 ${U.pickupLabel(this.originOf(before))} → ${U.pickupLabel(this.originOf(s))}` : '', before.start !== s.start || before.date !== s.date ? `시간 ${before.date !== s.date ? this.dateShort(before.date) + ' ' : ''}${before.start} → ${before.date !== s.date ? this.dateShort(s.date) + ' ' : ''}${s.start}` : ''].filter(Boolean).join(' · ')}` : '';
       const steps = [];
-      if (needDraft) steps.push(() => this.openDraft(s, Drafts.change(s, { date: before.date, start: before.start }, { date: s.date, start: s.start }, Store.profile())));
+      // 손님 초대장이 먼저 (손님은 예전 링크로 출발 시간을 맞추고 있어요) — 닫아도 위쪽 띠에 '바뀐 초대장 다시 보내기'가 남아요
       if (invChanged) steps.push(() => this.openInvite(s.id, { from: sent }));
+      if (needDraft) steps.push(() => this.openDraft(s, Drafts.change(s, { date: before.date, start: before.start }, { date: s.date, start: s.start }, Store.profile())));
       if (drvNote) steps.push(() => this.openDispatch(s.date, drvNote));
       if (steps.length) setTimeout(() => this.chain(steps), 50);
       return true;
@@ -833,12 +855,12 @@ const Sec = {
   openInvite(id, opts = {}) {
     const s = Store.get(id); if (!s) return;
     let co = '', note = ''; try { co = localStorage.getItem('ceo_company_name') || ''; note = localStorage.getItem('ceo_inv_note_' + id) || ''; } catch { /* */ }
-    const from = opts.from;
-    const diff = from ? [from.date !== s.date || from.start !== s.start ? (from.date === s.date ? `시간 ${this.dateShort(s.date)} ${from.start} → ${s.start}` : `시간 ${this.dateShort(from.date)} ${from.start} → ${this.dateShort(s.date)} ${s.start}`) : '', (from.location || '') !== (s.location || '') ? `장소 ${from.location || '-'} → ${s.location || '-'}` : ''].filter(Boolean).join(' · ') : '';
+    const lines = this.inviteDiff(opts.from, s), diff = lines.join(' · ');
+    const head = lines.length ? '손님에게 바뀐 초대장 다시 보내기' : '손님에게 초대장 보내기';
     const back = document.createElement('div');
     back.className = 'modal-back';
-    back.innerHTML = `<div class="modal dispatch" role="dialog" aria-label="손님에게 초대장 보내기">
-      <div class="ed-head"><div><h3>손님에게 초대장 보내기</h3><p class="muted small">${U.esc(s.title)} · ${this.dateShort(s.date)} ${U.esc(s.start)}</p></div>
+    back.innerHTML = `<div class="modal dispatch" role="dialog" aria-label="${head}">
+      <div class="ed-head"><div><h3>${head}</h3><p class="muted small">${U.esc(s.title)} · ${this.dateShort(s.date)} ${U.esc(s.start)}</p></div>
         <button class="icon-btn" data-close aria-label="닫기">${Icon.svg('x', 18)}</button></div>
       <div class="dp-body">
         ${diff ? `<p class="inv-changed">${Icon.svg('alert', 15)} <span>손님께 보낸 초대장과 달라졌어요 — ${U.esc(diff)}.<br>바뀐 초대장을 다시 보내 주세요.</span></p>` : ''}
@@ -847,18 +869,20 @@ const Sec = {
         <label class="dp-text">손님께 한마디 <span class="muted">(선택)</span><input id="inv-note" value="${U.esc(note)}" placeholder="예) 1층 안내데스크에서 방문증 받아 주세요"></label>
         <label class="dp-text">보낼 글<textarea id="inv-msg" rows="8" readonly></textarea></label>
       </div>
-      <div class="ed-foot"><span style="flex:1"></span><button class="btn" data-close>닫기</button><button class="btn" data-copy>복사</button><button class="btn primary" data-send>보내기 (카톡 등)</button></div></div>`;
+      <div class="ed-foot"><span style="flex:1"></span><button class="btn" data-close>닫기</button><button class="btn" data-copy>복사</button><button class="btn primary" data-send>${lines.length ? '바뀐 초대장 다시 보내기' : '보내기 (카톡 등)'}</button></div></div>`;
     document.body.appendChild(back);
     const build = () => {
       const c = back.querySelector('#inv-co').value.trim(), n = back.querySelector('#inv-note').value.trim();
       try { localStorage.setItem('ceo_company_name', c); localStorage.setItem('ceo_inv_note_' + id, n); } catch { /* */ }
       const o = { v: 1, id: String(s.id).slice(0, 12), c, t: s.title, d: s.date, s: s.start, l: s.location || '' };
       if (n) o.n = n.slice(0, 120);
+      if (diff) o.x = diff.slice(0, 160);   // 손님 화면 맨 위에 '시간 변경: 15:00 → 15:30'
       const bin = Array.from(new TextEncoder().encode(JSON.stringify(o)), x => String.fromCharCode(x)).join('');
       const url = this.INVITE_BASE + '?i=' + btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
       const dt = new Date(s.date + 'T00:00:00');
       const when = `${dt.getMonth() + 1}월 ${dt.getDate()}일 (${'일월화수목금토'[dt.getDay()]}) ${s.start}`;
-      const text = (diff ? `⚠ 변경 안내 — ${diff}\n` : '') + `💼 ${c ? `[${c}] ` : ''}미팅 초대\n▪ 일정  ${s.title}\n▪ 장소  ${s.location || '-'}\n▪ 일시  ${when}\n출발지만 고르면 출발 시간·길안내가 맞춰져요\n\n▶ 눌러서 받기\n${url}`;
+      // 다시 보내는 초대장은 바뀐 내용부터 ('시간 변경: 15:00 → 15:30')
+      const text = (lines.length ? `${lines.join('\n')}\n\n` : '') + `💼 ${c ? `[${c}] ` : ''}미팅 초대\n▪ 일정  ${s.title}\n▪ 장소  ${s.location || '-'}\n▪ 일시  ${when}\n출발지만 고르면 출발 시간·길안내가 맞춰져요\n\n▶ 눌러서 받기\n${url}`;
       back.querySelector('#inv-msg').value = text;
       return { text, url };
     };
@@ -870,7 +894,8 @@ const Sec = {
         const rec = { date: s.date, start: s.start, location: s.location || '', at: Date.now() };
         try { localStorage.setItem('ceo_inv_sent_' + id, JSON.stringify(rec)); } catch { /* */ }
         // 일정에도 남겨 다른 PC · 다른 비서도 '보낸 초대장'을 알게 (실제 기록 칸이라 대표님 확인은 다시 안 받아요)
-        Store.setActual(id, { invited: rec }).catch(() => { /* 이 PC 기록은 남음 */ });
+        // invitedAt: 언제 보냈는지 (일정에서 바로 보이게 — 시각 · 장소를 바꾸면 '바뀐 초대장 다시 보내기'를 띄우는 기준)
+        Store.setActual(id, { invited: rec }).catch(() => { /* 이 PC 기록은 남음 */ }).finally(() => this.renderAlerts());
       }
       if (e.target.closest('[data-copy]')) { const { text } = build(); try { await navigator.clipboard.writeText(text); U.toast('복사했어요. 카톡에 붙여넣어 보내 주세요'); } catch { prompt('길게 눌러 복사하세요', text); } }
       if (e.target.closest('[data-send]')) { const { text } = build(); if (navigator.share) { try { await navigator.share({ text }); } catch { /* */ } } else { try { await navigator.clipboard.writeText(text); U.toast('복사했어요. 카톡에 붙여넣어 보내 주세요'); } catch { prompt('길게 눌러 복사하세요', text); } } }
@@ -924,6 +949,22 @@ const Sec = {
     upd(); ta.addEventListener('input', upd); ph.addEventListener('input', upd);
     back.querySelector('[data-copy]').addEventListener('click', async () => { try { await navigator.clipboard.writeText(ta.value); U.toast('복사했어요'); } catch { U.toast('복사하지 못했어요. 직접 선택해 복사해 주세요'); } });
     return back;
+  },
+
+  /** 보낸 초대장과 지금 일정이 달라졌으면 보낸 기록을, 같으면 null (손님 링크는 예전 시각 · 장소 그대로라서) */
+  inviteStale(s) {
+    if (!s || s.masked || s.status === 'cancelled') return null;
+    const sent = this.inviteSent(s.id);
+    return sent && (sent.date !== s.date || sent.start !== s.start || (sent.location || '') !== (s.location || '')) ? sent : null;
+  },
+  /** 바뀐 내용 줄들 — ['시간 변경: 15:00 → 15:30', '장소 변경: A → B'] (날짜가 바뀌면 날짜도 같이) */
+  inviteDiff(from, s) {
+    if (!from) return [];
+    const out = [];
+    if (from.date !== s.date) out.push(`시간 변경: ${this.dateShort(from.date)} ${from.start} → ${this.dateShort(s.date)} ${s.start}`);
+    else if (from.start !== s.start) out.push(`시간 변경: ${from.start} → ${s.start}`);
+    if ((from.location || '') !== (s.location || '')) out.push(`장소 변경: ${from.location || '-'} → ${s.location || '-'}`);
+    return out;
   },
 
   /** 손님께 마지막으로 보낸 초대장 내용 (이 브라우저 기록 + 일정에 남은 기록 중 최근 것) */

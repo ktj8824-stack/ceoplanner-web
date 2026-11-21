@@ -55,6 +55,7 @@
     .home b { display:block; font-size:15.5px; } .home small { color:var(--sub); font-size:13px; }
     .again { display:block; margin:10px auto 0; border:0; background:none; color:var(--sub); font-size:13.5px; text-decoration:underline; font-family:inherit; }
     .note { font-size:12.5px; color:var(--sub); text-align:center; line-height:1.6; margin-top:6px; }
+    .chg { margin:0 0 10px; padding:10px 12px; border-radius:12px; background:#FBF0E1; color:#8F5512; font-size:14px; font-weight:700; line-height:1.5; }
     .msg { text-align:center; padding:60px 20px; color:var(--sub); }
     @keyframes pulse { 0% { box-shadow:0 0 0 0 rgba(16,185,129,.55); } 100% { box-shadow:0 0 0 10px rgba(16,185,129,0); } }
     @keyframes bob { 0%,100% { transform:translateY(0); } 50% { transform:translateY(3px); } }
@@ -93,7 +94,7 @@
       var sm = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(String(inv.s || ''));
       inv.s = sm ? ('0' + sm[1]).slice(-2) + ':' + sm[2] : '';
       if (!/^\d{4}-\d{2}-\d{2}$/.test(String(inv.d || '')) || isNaN(new Date(inv.d + 'T00:00:00').getTime())) inv.d = '';
-      ['t', 'c', 'l', 'n', 'id'].forEach(function (k) { if (inv[k] != null) inv[k] = String(inv[k]).slice(0, 200); });
+      ['t', 'c', 'l', 'n', 'id', 'x'].forEach(function (k) { if (inv[k] != null) inv[k] = String(inv[k]).slice(0, 200); });
     }
     if (!inv || !inv.t || !inv.d || !inv.s) { root.innerHTML = '<div class="msg"><b>초대장을 열 수 없어요</b><br>받으신 링크 전체를 다시 눌러 주세요.</div>'; return; }
     document.getElementById('co').textContent = inv.c || 'CEO PLANNER';
@@ -123,7 +124,9 @@
       var now = step(), order = ['origin', 'prep', 'mode'], ni = now === 'done' ? 99 : order.indexOf(now);
       function cls(k) { var i = order.indexOf(k); return i === ni ? 'now' : i < ni ? 'done' : 'wait'; }
       function num(k) { var i = order.indexOf(k); return i < ni ? '✓' : String(i + 1); }
-      var h = '<div class="card">' +
+      // 다시 보낸 초대장: 무엇이 바뀌었는지 맨 위에 ('시간 변경: 15:00 → 15:30')
+      var h = (inv.x ? '<div class="chg" role="status">' + esc(inv.x) + '<br><small>바뀐 내용으로 출발 시간을 다시 계산했어요</small></div>' : '') +
+        '<div class="card">' +
         '<div class="ss-row"><span class="ss-i">' + IC.brief + '</span><div><small>미팅</small><b>' + esc(inv.t) + '</b></div></div>' +
         '<div class="ss-row"><span class="ss-i">' + IC.cal + '</span><div><small>일시</small><b>' + esc(dt()) + '</b></div></div>' +
         (inv.l ? '<div class="ss-row"><span class="ss-i">' + IC.pin + '</span><div><small>장소</small><b>' + esc(inv.l) + '</b></div></div>' : '') +
