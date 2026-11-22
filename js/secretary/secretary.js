@@ -537,16 +537,21 @@ const Sec = {
   openDispatch(ymd, note = '') {
     const p = Store.profile();
     const plans = Backtime.planDay(Store.byDate(ymd).filter(s => s.status !== 'cancelled' && !s.masked), { prepMin: p.prepMin, commuteMin: p.commuteMin })
-      .filter(({ s }) => s.mode === 'driver' || (s.trip && s.trip.accessMode === 'driver'));
-    const lines = plans.map(({ s, p: pl }) => `${U.hm(pl.driverCallAt || pl.leaveAt)} ${U.pickupLabel(s.origin || this.originFor(s.date, s.start, s.id)) || '본사'} 대기 → ${U.hm(pl.leaveAt)} 출발 · ${s.trip ? (s.trip.station || '역') : (s.location || '')} (${s.start} ${s.title})`);
+      .filter(({ s }) => Backtime.driverLeg(s));
+    // 도착지 마중 (국제선은 전날 출발 일정도) — '20:40 인천공항 T2 3층 출구 마중 대기 (KE708 20:00 도착 · 도쿄 출장 귀국)'
+    const pks = Store.list().filter(s => (s.date === ymd || s.date === U.addDays(ymd, -1)) && s.status !== 'cancelled' && !s.masked && Backtime.isTrip(s.mode) && s.trip && s.trip.pickup && s.trip.pickup.on)
+      .map(s => ({ s, pk: Backtime.plan(s).pickup })).filter(({ pk }) => pk && U.ymd(pk.waitAt) === ymd);
+    const pkWhere = pk => [pk.station, pk.spot].filter(Boolean).join(' ') || '도착 출구';
+    const lines = [...plans.map(({ s, p: pl }) => ({ at: pl.driverCallAt || pl.leaveAt, t: `${U.hm(pl.driverCallAt || pl.leaveAt)} ${U.pickupLabel(s.origin || this.originFor(s.date, s.start, s.id)) || '본사'} 대기 → ${U.hm(pl.leaveAt)} 출발 · ${s.trip ? (s.trip.station || '역') : (s.location || '')} (${s.start} ${s.title})` })),
+      ...pks.map(({ s, pk }) => ({ at: pk.waitAt, t: `${U.hm(pk.waitAt)} ${pkWhere(pk)} 마중 대기 (${pk.flightNo ? pk.flightNo + ' ' : ''}${U.hm(pk.arriveAt)} 도착 · ${s.title})` }))].sort((a, b) => a.at - b.at).map(x => x.t);
     const link = CEOP_CONFIG.DRIVER_URL ? `\n배차표 · 대기/출발/도착 알리기: ${new URL(CEOP_CONFIG.DRIVER_URL, location.href).href}` : '';
     const text = lines.length ? `${note ? `⚠ ${note}\n` : ''}[${this.dateShort(ymd)} 배차]\n${lines.join('\n')}${link}\n- ${p.secretaryName || '비서'}` : '';
     const back = document.createElement('div');
     back.className = 'modal-back';
     back.innerHTML = `<div class="modal dispatch" role="dialog" aria-label="기사님께 배차 알림">
-      <div class="ed-head"><div><h3>기사님께 배차 알림</h3><p class="muted small">${U.esc(p.driverName || '기사님')} · ${this.dateShort(ymd)} · 기사 차량 일정 ${plans.length}건</p></div>
+      <div class="ed-head"><div><h3>기사님께 배차 알림</h3><p class="muted small">${U.esc(p.driverName || '기사님')} · ${this.dateShort(ymd)} · 기사 차량 일정 ${plans.length}건${pks.length ? ` · 도착 마중 ${pks.length}건` : ''}</p></div>
         <button class="icon-btn" data-close aria-label="닫기">${Icon.svg('x', 18)}</button></div>
-      <div class="dp-body">${lines.length ? `<ol class="dp-list">${plans.map(({ s, p: pl }) => `<li><b class="num">${U.hm(pl.driverCallAt || pl.leaveAt)}</b><span>대기 · ${U.hm(pl.leaveAt)} 출발<small>${U.esc(s.trip ? (s.trip.station || '역') : (s.location || ''))} · ${s.start} ${U.esc(s.title)}</small></span></li>`).join('')}</ol>
+      <div class="dp-body">${lines.length ? `<ol class="dp-list">${plans.map(({ s, p: pl }) => `<li><b class="num">${U.hm(pl.driverCallAt || pl.leaveAt)}</b><span>대기 · ${U.hm(pl.leaveAt)} 출발<small>${U.esc(s.trip ? (s.trip.station || '역') : (s.location || ''))} · ${s.start} ${U.esc(s.title)}</small></span></li>`).join('')}${pks.map(({ s, pk }) => `<li><b class="num">${U.hm(pk.waitAt)}</b><span>마중 대기 · ${U.esc(pkWhere(pk))}<small>${pk.flightNo ? U.esc(pk.flightNo) + ' ' : ''}${U.hm(pk.arriveAt)} 도착 · ${U.esc(s.title)}</small></span></li>`).join('')}</ol>
         <label class="dp-text">보낼 문자<textarea id="dpText" rows="${lines.length + 3}">${U.esc(text)}</textarea></label>`
         : '<p class="muted">이 날은 기사 차량 일정이 없어요.</p>'}</div>
       <div class="ed-foot"><span style="flex:1" class="muted small">문자 속 링크로 기사님이 대기 · 출발 · 도착을 알려 줘요</span>
@@ -600,12 +605,15 @@ const Sec = {
         </fieldset>
         <datalist id="originList"></datalist>
         <fieldset class="full" id="tripBox"><legend>기차 · 비행기</legend>
-          <label>역 · 공항<input name="station" value="${U.esc(t.station || '')}" placeholder="예: 서울역"></label>
+          <label>출발 역 · 공항<input name="station" value="${U.esc(t.station || '')}" placeholder="예: 서울역"></label>
           <label>출발 시각<input name="departTime" type="time" value="${t.departTime || ''}"></label>
           <label>도착 시각<input name="arriveTime" type="time" value="${t.arriveTime || ''}"></label>
           <label>역까지 (분)<input name="accessMin" type="number" min="0" max="300" value="${Number(t.accessMin || 0)}"></label>
-          <label>역까지 수단<select name="accessMode">${opt({ driver: Backtime.MODES.driver, taxi: Backtime.MODES.taxi, car: Backtime.MODES.car }, t.accessMode || 'driver')}</select></label>
+          <label>역까지 수단<select name="accessMode" data-auto="1">${opt({ driver: Backtime.MODES.driver, taxi: Backtime.MODES.taxi, car: Backtime.MODES.car }, t.accessMode || 'driver')}</select></label>
           <label>국제선<select name="intl"><option value="">아니오</option><option value="1" ${t.intl ? 'selected' : ''}>예</option></select></label>
+          <label>도착 공항 · 역<input name="arriveStation" value="${U.esc(t.arriveStation || '')}" placeholder="예: 인천공항 T2"></label>
+          <label>편명<input name="flightNo" value="${U.esc(t.flightNo || '')}" placeholder="선택 · 예: KE708"></label>
+          <p class="hint abroad" hidden>${Icon.svg('info', 13)} 해외 출발 구간은 기사님 배차에서 빼요 · 기사님은 도착 마중만 가요</p>
           <label class="check pk-on"><input type="checkbox" name="pickupOn" ${t.pickup && t.pickup.on ? 'checked' : ''}> 도착지 마중 <span class="muted small">— 도착하면 기사님이 마중 장소에서 대기 (배차표에 자동으로 들어가요)</span></label>
           <label class="pk">짐 찾는 시간 (분)<input name="pickupBag" type="number" min="0" max="180" value="${t.pickup && t.pickup.bagMin != null ? Number(t.pickup.bagMin) : Backtime.pickupBagDefault(s.mode, t.intl)}" ${t.pickup && t.pickup.bagMin != null ? '' : 'data-auto="1"'}></label>
           <label class="pk pk-spot">마중 장소<input name="pickupSpot" value="${U.esc((t.pickup && t.pickup.spot) || '')}" placeholder="예: T2 3층 출구"></label>
@@ -641,6 +649,7 @@ const Sec = {
     const reOrigin = e => { if (!originTouched && f.elements.origin && ['date', 'start'].includes(e.target.name)) f.elements.origin.value = this.originFor(f.elements.date.value, f.elements.start.value, this.edit && this.edit.id); };
     f.addEventListener('change', reOrigin);
     f.elements.pickupBag && f.elements.pickupBag.addEventListener('input', e => { delete e.target.dataset.auto; });
+    f.elements.accessMode && f.elements.accessMode.addEventListener('change', e => { if (e.isTrusted) delete e.target.dataset.auto; });
     f.addEventListener('input', () => { this.dirty = true; this.syncForm(f, back); });
     f.addEventListener('change', () => this.syncForm(f, back));
     f.addEventListener('submit', async e => { e.preventDefault(); if (await this.save(f)) { this.dirty = false; this.edit = null; back.remove(); } });
@@ -650,6 +659,17 @@ const Sec = {
       if (ap) { f.elements.travelMin.value = ap.dataset.applymin; this.dirty = true; this.syncForm(f, back); }
       const pl = e.target.closest('[data-pickplace]');
       if (pl) { f.elements.location.value = pl.dataset.pickplace; this.dirty = true; this.syncForm(f, back); }
+      // 도착이 늦어진 일정: 이 일정 시작 · 종료를 같은 길이로 미룸
+      const ps = e.target.closest('[data-pvstart]');
+      if (ps) {
+        const st = f.elements.start.value, en = f.elements.end.value, to = ps.dataset.pvstart;
+        const dur = U.diffMin(U.at(f.elements.date.value, en), U.at(f.elements.date.value, st));
+        f.elements.start.value = to; f.elements.end.value = U.hm(U.addMin(U.at(f.elements.date.value, to), dur > 0 ? dur : 60));
+        this.dirty = true; this.syncForm(f, back); U.toast(`시작을 ${to}${this.ro(to)} 바꿨어요. 저장하면 반영돼요`);
+      }
+      // 뒤 일정 미루기 (당일 동선과 같은 확인 → 저장 → 대표님께 알림)
+      const sh = e.target.closest('[data-shift]');
+      if (sh) this.shiftSchedule(sh.dataset.shift, sh.dataset.to).then(() => this.syncForm(f, back));
     });
     back.querySelector('[data-del]')?.addEventListener('click', () => this.deleteFlow(target.id, () => { this.dirty = false; this.edit = null; back.remove(); }));
     // 고친 내용이 있으면 먼저 저장 — 저장 안 하면 예전 시각으로 초대장이 나가요
@@ -707,6 +727,7 @@ const Sec = {
       visibility: 'normal', status: (id && Store.get(id) && Store.get(id).status) || 'scheduled',
       briefing: { who: v('who').trim(), company: v('company').trim(), purpose: v('purpose').trim(), last: v('last').trim(), notes: v('notes').trim(), bring: v('bring').trim(), phone: v('phone').trim() },
       trip: Backtime.isTrip(mode) ? { station: v('station').trim(), departTime: v('departTime'), arriveTime: v('arriveTime'), accessMin: Number(v('accessMin')) || 0, accessMode: v('accessMode'), intl: !!v('intl'),
+        arriveStation: v('arriveStation').trim(), flightNo: v('flightNo').trim().toUpperCase(),
         pickup: f.elements.pickupOn && f.elements.pickupOn.checked ? { on: true, bagMin: v('pickupBag') === '' ? Backtime.pickupBagDefault(mode, !!v('intl')) : Number(v('pickupBag')), spot: v('pickupSpot').trim() } : null } : null,
     };
     if (id) s.id = id;
@@ -721,6 +742,14 @@ const Sec = {
     const bag = f.elements.pickupBag;
     if (bag && bag.dataset.auto) bag.value = Backtime.pickupBagDefault(mode, !!f.elements.intl.value);
     back.querySelectorAll('#tripBox .pk').forEach(el => { el.style.display = f.elements.pickupOn && f.elements.pickupOn.checked ? '' : 'none'; });
+    // 국제선 + 도착지 마중(귀국편): 해외 출발 구간은 서울 기사님이 못 가요 → '역까지 수단'을 택시로 (직접 고르기 전까지)
+    const abroad = Backtime.departAbroad(s), am = f.elements.accessMode;
+    if (am && am.dataset.auto) {
+      if (abroad && am.value === 'driver') { am.value = 'taxi'; am.dataset.switched = '1'; s.trip.accessMode = 'taxi'; }
+      else if (!abroad && am.dataset.switched) { am.value = 'driver'; delete am.dataset.switched; if (s.trip) s.trip.accessMode = 'driver'; }
+    }
+    back.querySelector('#tripBox .abroad').hidden = !abroad;
+    if (f.elements.arriveStation) f.elements.arriveStation.placeholder = (s.trip && Backtime.arriveStation({ ...s, trip: { ...s.trip, arriveStation: '' } })) || '예: 인천공항 T2';
     back.querySelectorAll('.mv').forEach(el => { el.style.display = mode === 'none' ? 'none' : ''; });
     back.querySelector('#travelLbl').textContent = Backtime.isTrip(mode) ? '도착역 → 현장 (분)' : '이동 시간 (분)';
     back.querySelector('#startLbl').textContent = s.category === 'golf' ? '티오프' : '시작';
@@ -735,7 +764,9 @@ const Sec = {
     const mine = day.find(d => d.s === s);
     const all = [...Store.list().filter(x => x.id !== s.id), s];
     const warns = [...Backtime.conflictsOn(all, s.date), ...Backtime.conflictsOn(all, U.addDays(s.date, 1))].filter(w => w.a === s || w.b === s);
-    if (mine.p.warn) warns.unshift({ msg: mine.p.warn });
+    // 기차 · 비행기 도착이 늦어 시작에 못 맞추면 '시작 미루기' (이 창의 시작 · 종료만 바꿔요 — 저장은 직접)
+    const ceil5 = m => Math.ceil(m / 5) * 5;
+    if (mine.p.warn) warns.unshift({ msg: mine.p.warn, self: mine.p.lateMin > 0 ? U.hm(U.addMin(mine.p.startAt, ceil5(mine.p.lateMin))) : '' });
     const go = s.mode !== 'none';
     const past = s.date && s.start && U.at(s.date, s.start) < new Date() && !(this.edit && this.edit.id) ? `<p class="pv-status">${Icon.svg('info', 15)} 이미 지난 시각이에요 — 기록용이면 그대로 저장하세요 (대표님 확인 대기에는 안 들어가요)</p>` : '';
     const prevS = this.prevFor(s.date, s.start, s.id);
@@ -743,7 +774,13 @@ const Sec = {
     const overnight = s.end && s.end < s.start ? `<p class="pv-status">${Icon.svg('clock', 15)} 다음 날 ${s.end}에 끝나는 일정으로 저장돼요</p>` : '';
     // 새 일정을 막 열었을 때(아직 아무것도 안 고침)는 경고 대신 안내 — 처음 쓰는 분이 놀라지 않게
     const fresh = !(this.edit && this.edit.id) && !this.dirty;
-    const status = fresh ? `<p class="pv-status">${Icon.svg('info', 15)} 날짜 · 시간 · 장소를 정하면 앞뒤 일정과 겹치는지 바로 알려 드려요</p>` : past + gapNote + overnight + (warns.length ? warns.map(w => `<p class="pv-status bad">${Icon.svg('alert', 15)} ${U.esc(w.msg)}</p>`).join('')
+    const status = fresh ? `<p class="pv-status">${Icon.svg('info', 15)} 날짜 · 시간 · 장소를 정하면 앞뒤 일정과 겹치는지 바로 알려 드려요</p>` : past + gapNote + overnight + (warns.length ? warns.map(w => {
+        // 뒤 일정이 밀려 겹치면 그 일정을 '…으로 미루기' (당일 동선의 미루기와 같은 버튼)
+        const nxt = w.a === s && w.b && !w.b.masked && w.b.id ? U.hm(U.addMin(U.at(w.b.date, w.b.start), ceil5(w.shortMin))) : '';
+        const btn = w.self ? `<button type="button" class="btn sm signal" data-pvstart="${w.self}">시작 ${w.self}${this.ro(w.self)} 미루기</button>`
+          : nxt ? `<button type="button" class="btn sm signal" data-shift="${w.b.id}" data-to="${nxt}">${U.esc(w.b.title)} ${nxt}${this.ro(nxt)} 미루기</button>` : '';
+        return `<p class="pv-status bad">${Icon.svg('alert', 15)} <span>${U.esc(w.msg)}${btn ? `<br>${btn}` : ''}</span></p>`;
+      }).join('')
       : `<p class="pv-status ok">${Icon.svg('checkCircle', 15)} 같은 날 앞뒤 일정과 겹치지 않아요${s.mode === 'driver' ? ` · ${U.esc(Store.profile().driverName || '기사님')} 배차 가능` : ''}</p>`);
     box.innerHTML = `<span class="pv-cap">대표님 앱에 이렇게 보여요</span>
       ${go ? `<span class="pv-cap">출발</span><b class="pv-big num">${U.hm(mine.p.leaveAt)}</b>` : `<span class="pv-cap">시작</span><b class="pv-big num">${s.start}</b>`}
@@ -782,14 +819,16 @@ const Sec = {
       const soon = before && [before.date, s.date].some(d => d === U.today() || d === U.addDays(U.today(), 1));
       if (ch && soon) await Store.send(`'${s.title}' 일정이 바뀌었어요: ${ch}`, { ref: s.id, urgent: [before.date, s.date].includes(U.today()) }).catch(() => U.toast('저장했지만 대표님께 알림을 보내지 못했어요'));
       // 기사 차량 일정의 대기 장소(출발지) · 시각이 바뀌면 기사님께 보낼 변경 문자를 이어서 (기사님 배차표도 '픽업 장소 바뀜'으로 표시)
-      const byDriver = x => x.mode === 'driver' || (x.trip && x.trip.accessMode === 'driver');
-      const drvNote = before && soon && (byDriver(before) || byDriver(s)) && ((before.origin || '') !== (s.origin || '') || before.start !== s.start || before.date !== s.date)
+      const byDriver = x => Backtime.driverLeg(x);
+      // 도착지 마중 일정의 도착 시각이 바뀌면(연착) 기사님 마중 대기 시각도 바뀌어요 → 배차 문자를 이어서
+      const pkNote = before && soon ? this.pickupNote(before, s) : '';
+      const drvNote = pkNote ? `변경 · '${s.title}' ${pkNote}` : before && soon && (byDriver(before) || byDriver(s)) && ((before.origin || '') !== (s.origin || '') || before.start !== s.start || before.date !== s.date)
         ? `변경 · '${s.title}' ${[(before.origin || '') !== (s.origin || '') ? `대기 장소 ${U.pickupLabel(this.originOf(before))} → ${U.pickupLabel(this.originOf(s))}` : '', before.start !== s.start || before.date !== s.date ? `시간 ${before.date !== s.date ? this.dateShort(before.date) + ' ' : ''}${before.start} → ${before.date !== s.date ? this.dateShort(s.date) + ' ' : ''}${s.start}` : ''].filter(Boolean).join(' · ')}` : '';
       const steps = [];
       // 손님 초대장이 먼저 (손님은 예전 링크로 출발 시간을 맞추고 있어요) — 닫아도 위쪽 띠에 '바뀐 초대장 다시 보내기'가 남아요
       if (invChanged) steps.push(() => this.openInvite(s.id, { from: sent }));
       if (needDraft) steps.push(() => this.openDraft(s, Drafts.change(s, { date: before.date, start: before.start }, { date: s.date, start: s.start }, Store.profile())));
-      if (drvNote) steps.push(() => this.openDispatch(s.date, drvNote));
+      if (drvNote) steps.push(() => this.openDispatch(pkNote ? this.pickupDay(s) : s.date, drvNote));
       if (steps.length) setTimeout(() => this.chain(steps), 50);
       return true;
     } catch (err) { U.toast('저장하지 못했어요: ' + (err.message || err)); return false; }
@@ -813,8 +852,26 @@ const Sec = {
       a.date !== b.date || a.start !== b.start ? `${a.date !== b.date ? this.dateShort(a.date) + ' ' : ''}${a.start} → ${a.date !== b.date ? this.dateShort(b.date) + ' ' : ''}${b.start}` : '',
       (a.location || '') !== (b.location || '') ? `장소 ${a.location || '-'} → ${b.location || '-'}` : '',
       (a.origin || '') !== (b.origin || '') ? `출발지 ${this.originOf(a)} → ${this.originOf(b)}` : '',
+      this.arriveNote(a, b),
     ].filter(Boolean).join(' · ');
   },
+  /** 기차 · 비행기 도착 시각이 바뀌었으면 '귀국편 도착 18:00 → 20:00 · 마중 20:40' — 안 바뀌었으면 '' */
+  arriveNote(a, b) {
+    const ta = (a && a.trip) || {}, tb = (b && b.trip) || {};
+    if (!Backtime.isTrip(b.mode) || !ta.arriveTime || !tb.arriveTime || ta.arriveTime === tb.arriveTime) return '';
+    const kind = Backtime.departAbroad(b) ? '귀국편' : b.mode === 'flight' ? '비행기' : '기차';
+    const pk = Backtime.plan(b).pickup;
+    return `${kind}${tb.flightNo ? ` ${tb.flightNo}` : ''} 도착 ${ta.arriveTime} → ${tb.arriveTime}${pk ? ` · 마중 ${U.hm(pk.waitAt)}` : ''}`;
+  },
+  /** 도착지 마중 대기 시각이 바뀌었으면 기사님께 보낼 한 줄 ('마중 대기 18:40 → 20:40 · 도착 18:00 → 20:00') */
+  pickupNote(a, b) {
+    const pa = Backtime.plan(a).pickup, pb = Backtime.plan(b).pickup;
+    if (!pb || (pa && +pa.waitAt === +pb.waitAt)) return '';
+    const fn = b.trip.flightNo ? ` ${b.trip.flightNo}` : '';
+    return pa ? `마중 대기 ${U.hm(pa.waitAt)} → ${U.hm(pb.waitAt)} · 도착${fn} ${U.hm(pa.arriveAt)} → ${U.hm(pb.arriveAt)}` : `마중 대기 ${U.hm(pb.waitAt)} · 도착${fn} ${U.hm(pb.arriveAt)}`;
+  },
+  /** 마중 대기하는 날 (국제선은 다음 날 도착일 수 있어요) */
+  pickupDay(s) { const pk = Backtime.plan(s).pickup; return pk ? U.ymd(pk.waitAt) : s.date; },
 
   /** 등록 창 도우미: 배운 이동 시간 · 식사 장소 추천 · 반복 안내 */
   syncHelpers(f, back, s) {
@@ -913,9 +970,9 @@ const Sec = {
         const all = ids.map(i => Store.get(i)).filter(Boolean), off = all.filter(live);
         if (off.length) await Store.upsertMany(off.map(x => ({ ...x, status: 'cancelled' })));
         await Store.removeMany(all.filter(x => !live(x)).map(x => x.id));
-        for (const x of off) await Store.send(`'${x.title}'(${x.date === U.today() ? '오늘' : '내일'} ${x.start}) 일정이 취소됐어요.${x.mode === 'driver' || (x.trip && x.trip.accessMode === 'driver') ? ' 기사님 배차표에도 \'취소됨\'으로 보여요.' : ''}`, { ref: x.id, urgent: x.date === U.today() });
+        for (const x of off) await Store.send(`'${x.title}'(${x.date === U.today() ? '오늘' : '내일'} ${x.start}) 일정이 취소됐어요.${Backtime.driverLeg(x) ? ' 기사님 배차표에도 \'취소됨\'으로 보여요.' : ''}`, { ref: x.id, urgent: x.date === U.today() });
         done && done();
-        U.toast(off.length ? `취소했어요. 대표님${off.some(x => x.mode === 'driver' || (x.trip && x.trip.accessMode === 'driver')) ? '·기사님' : ''}께 알렸어요` : ids.length > 1 ? `일정 ${ids.length}건을 삭제했어요` : '일정을 삭제했어요');
+        U.toast(off.length ? `취소했어요. 대표님${off.some(x => Backtime.driverLeg(x)) ? '·기사님' : ''}께 알렸어요` : ids.length > 1 ? `일정 ${ids.length}건을 삭제했어요` : '일정을 삭제했어요');
         if (s.briefing && s.briefing.who && U.at(s.date, s.start) > new Date()) setTimeout(() => this.openDraft(s, Drafts.cancel(s, Store.profile())), 50);
       } catch (err) { U.toast('삭제하지 못했어요: ' + (err.message || err)); }
     };
