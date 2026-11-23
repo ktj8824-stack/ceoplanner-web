@@ -616,7 +616,7 @@ const Sec = {
         <label class="full">장소<input name="location" value="${U.esc(s.location || '')}" placeholder="예: 한빛전자 삼성동 사옥"></label>
         <div class="full place-rec" id="placeRec"></div>
         <fieldset class="full move" id="moveBox"><legend>이동</legend>
-          <label>출발지<input name="origin" value="${U.esc(s.origin || '')}" placeholder="앞 일정 장소 또는 본사" list="originList"></label>
+          <label>출발지<input name="origin" value="${U.esc(s.origin || '')}" placeholder="앞 일정 장소 · 그날 첫 일정이면 자택" list="originList"></label>
           <label>이동수단<select name="mode">${opt(Backtime.MODES, s.mode)}</select></label>
           <label class="mv"><span id="travelLbl">이동 시간 (분)</span><input name="travelMin" type="number" min="0" max="600" value="${Number(s.travelMin || 0)}"></label>
           <label class="mv">여유 (분)<input name="bufferMin" type="number" min="0" max="120" value="${Number(s.bufferMin ?? 10)}"></label>
@@ -634,7 +634,7 @@ const Sec = {
           <label>국제선<select name="intl"><option value="">아니오</option><option value="1" ${t.intl ? 'selected' : ''}>예</option></select></label>
           <label>도착 공항 · 역<input name="arriveStation" value="${U.esc(t.arriveStation || '')}" placeholder="예: 인천공항 T2"></label>
           <label>편명<input name="flightNo" value="${U.esc(t.flightNo || '')}" placeholder="선택 · 예: KE708"></label>
-          <p class="hint abroad" hidden>${Icon.svg('info', 13)} 해외 출발 구간은 기사님 배차에서 빼요 · 기사님은 도착 마중만 가요</p>
+          <p class="hint abroad" hidden>${Icon.svg('info', 13)} 서울 밖에서 출발하는 구간은 기사님 배차에서 빼요 · 기사님은 도착 마중만 가요</p>
           <label class="check pk-on"><input type="checkbox" name="pickupOn" ${t.pickup && t.pickup.on ? 'checked' : ''}> 도착지 마중 <span class="muted small">— 도착하면 기사님이 마중 장소에서 대기 (배차표에 자동으로 들어가요)</span></label>
           <label class="pk">짐 찾는 시간 (분)<input name="pickupBag" type="number" min="0" max="180" value="${t.pickup && t.pickup.bagMin != null ? Number(t.pickup.bagMin) : Backtime.pickupBagDefault(s.mode, t.intl)}" ${t.pickup && t.pickup.bagMin != null ? '' : 'data-auto="1"'}></label>
           <label class="pk pk-spot">마중 장소<input name="pickupSpot" value="${U.esc((t.pickup && t.pickup.spot) || '')}" placeholder="예: T2 3층 출구"></label>
@@ -666,7 +666,7 @@ const Sec = {
     back.querySelector('#originList').innerHTML = places.map(pl => `<option value="${U.esc(pl)}">`).join('');
     // 출발지를 직접 고치지 않았으면, 날짜·시작 시각이 바뀔 때 '그 전 일정 장소'로 다시 채움
     let originTouched = !!(this.edit && this.edit.id);
-    f.elements.origin && f.elements.origin.addEventListener('input', () => { originTouched = true; });
+    f.elements.origin && f.elements.origin.addEventListener('input', e => { originTouched = true; e.target.dataset.touched = '1'; });
     const reOrigin = e => { if (!originTouched && f.elements.origin && ['date', 'start'].includes(e.target.name)) f.elements.origin.value = this.originFor(f.elements.date.value, f.elements.start.value, this.edit && this.edit.id); };
     f.addEventListener('change', reOrigin);
     f.elements.pickupBag && f.elements.pickupBag.addEventListener('input', e => { delete e.target.dataset.auto; });
@@ -714,13 +714,9 @@ const Sec = {
     f.title.focus();
   },
 
-  /** 출발지 기본값 — 이 일정 시작 전에 끝나는 마지막 일정 장소, 없으면 본사.
-   *  앞 일정이 끝나고 3시간 넘게 비면 그 사이 다른 곳(대개 자택)으로 갔다고 보고 앞 장소를 쓰지 않아요 */
-  originFor(d, start, exceptId) {
-    const prev = this.prevFor(d, start, exceptId);
-    if (prev && this.gapMin(prev, start) > 180) return '자택';
-    return prev ? prev.location : '본사';
-  },
+  /** 출발지 기본값 — 이 일정 시작 전에 끝나는 마지막 일정 장소. 그날 첫 일정이면 자택.
+   *  앞 일정이 끝나고 3시간 넘게 비면 그 사이 다른 곳(대개 자택)으로 갔다고 보고 앞 장소를 쓰지 않아요 (Backtime.defaultOrigin) */
+  originFor(d, start, exceptId) { return Backtime.defaultOrigin(Store.list(), { date: d, start, id: exceptId }); },
   prevFor(d, start, exceptId) {
     return Store.byDate(d).filter(x => !x.masked && x.location && x.status !== 'cancelled' && x.id !== exceptId && (x.end || x.start) <= start && x.start <= start).pop();
   },
@@ -745,10 +741,12 @@ const Sec = {
     const v = n => (f.elements[n] && f.elements[n].value) || '';
     const mode = v('mode');
     const id = this.edit && this.edit.id;
+    // 새 일정에서 저절로 채운 '자택'(그날 첫 일정)은 비워서 저장 → 화면 · 배차표가 그때그때 계산 (나중에 앞에 일정이 생기면 그 장소로)
+    const autoHome = !id && f.elements.origin && !f.elements.origin.dataset.touched && v('origin').trim() === Backtime.HOME;
     const s = {
       ...(id ? Store.get(id) : {}),
       title: v('title').trim(), category: v('category') || 'external', date: v('date'), start: v('start'), end: v('end'),
-      location: v('location').trim(), origin: v('origin').trim(), mode, travelMin: Number(v('travelMin')) || 0, bufferMin: Number(v('bufferMin')) || 0,
+      location: v('location').trim(), origin: autoHome ? '' : v('origin').trim(), mode, travelMin: Number(v('travelMin')) || 0, bufferMin: Number(v('bufferMin')) || 0,
       visibility: 'normal', status: (id && Store.get(id) && Store.get(id).status) || 'scheduled',
       briefing: { who: v('who').trim(), company: v('company').trim(), purpose: v('purpose').trim(), last: v('last').trim(), notes: v('notes').trim(), bring: v('bring').trim(), phone: v('phone').trim() },
       trip: Backtime.isTrip(mode) ? { station: v('station').trim(), departTime: v('departTime'), arriveTime: v('arriveTime'), accessMin: Number(v('accessMin')) || 0, accessMode: v('accessMode'), intl: !!v('intl'),
@@ -767,7 +765,7 @@ const Sec = {
     const bag = f.elements.pickupBag;
     if (bag && bag.dataset.auto) bag.value = Backtime.pickupBagDefault(mode, !!f.elements.intl.value);
     back.querySelectorAll('#tripBox .pk').forEach(el => { el.style.display = f.elements.pickupOn && f.elements.pickupOn.checked ? '' : 'none'; });
-    // 국제선 + 도착지 마중(귀국편): 해외 출발 구간은 서울 기사님이 못 가요 → '역까지 수단'을 택시로 (직접 고르기 전까지)
+    // 도착지 마중을 켠 돌아오는 편인데 출발역 · 공항이 서울 밖(김해공항 · 부산역 · 해외): 서울 기사님이 못 가요 → '역까지 수단'을 택시로 (직접 고르기 전까지)
     const abroad = Backtime.departAbroad(s), am = f.elements.accessMode;
     if (am && am.dataset.auto) {
       if (abroad && am.value === 'driver') { am.value = 'taxi'; am.dataset.switched = '1'; s.trip.accessMode = 'taxi'; }
@@ -795,7 +793,7 @@ const Sec = {
     const go = s.mode !== 'none';
     const past = s.date && s.start && U.at(s.date, s.start) < new Date() && !(this.edit && this.edit.id) ? `<p class="pv-status">${Icon.svg('info', 15)} 이미 지난 시각이에요 — 기록용이면 그대로 저장하세요 (대표님 확인 대기에는 안 들어가요)</p>` : '';
     const prevS = this.prevFor(s.date, s.start, s.id);
-    const gapNote = prevS && this.gapMin(prevS, s.start) > 180 && s.origin !== prevS.location ? `<p class="pv-status">${Icon.svg('info', 15)} 앞 일정(${U.esc(prevS.location)})이 ${U.esc(prevS.end || prevS.start)}에 끝나고 시간이 많이 비어요 — 출발지(${U.esc(s.origin || '본사')})가 맞는지 확인해 주세요</p>` : '';
+    const gapNote = prevS && this.gapMin(prevS, s.start) > 180 && s.origin !== prevS.location ? `<p class="pv-status">${Icon.svg('info', 15)} 앞 일정(${U.esc(prevS.location)})이 ${U.esc(prevS.end || prevS.start)}에 끝나고 시간이 많이 비어요 — 출발지(${U.esc(this.originOf(s))})가 맞는지 확인해 주세요</p>` : '';
     const om = this.originMoved(s);
     const originNote = om ? `<p class="pv-status warn">${Icon.svg('alert', 15)} 출발지가 바뀌었어요 — 이동 시간 ${Number(s.travelMin || 0)}분이 ${U.esc(this.originOf(s))} 기준인지 확인해 주세요</p>` : '';
     const overnight = s.end && s.end < s.start ? `<p class="pv-status">${Icon.svg('clock', 15)} 다음 날 ${s.end}에 끝나는 일정으로 저장돼요</p>` : '';
@@ -885,7 +883,7 @@ const Sec = {
     return Learn.key(this.originOf(o)) !== Learn.key(this.originOf(s)) && Number(s.travelMin || 0) === Number(o.travelMin || 0);
   },
 
-  /** 출발지 칸이 비면 화면처럼 앞 일정 장소(없으면 본사) */
+  /** 출발지 칸이 비면 화면처럼 앞 일정 장소(그날 첫 일정이면 자택) */
   originOf(x) { return x.origin || this.originFor(x.date, x.start, x.id); },
 
   /** 시각 · 장소 · 출발지가 어떻게 바뀌었는지 한 줄 ('15:00 → 15:30 · 장소 A → B') — 안 바뀌었으면 '' */
@@ -901,7 +899,7 @@ const Sec = {
   arriveNote(a, b) {
     const ta = (a && a.trip) || {}, tb = (b && b.trip) || {};
     if (!Backtime.isTrip(b.mode) || !ta.arriveTime || !tb.arriveTime || ta.arriveTime === tb.arriveTime) return '';
-    const kind = Backtime.departAbroad(b) ? '귀국편' : b.mode === 'flight' ? '비행기' : '기차';
+    const kind = Backtime.departAbroad(b) && tb.intl ? '귀국편' : b.mode === 'flight' ? '비행기' : '기차';
     const pk = Backtime.plan(b).pickup;
     return `${kind}${tb.flightNo ? ` ${tb.flightNo}` : ''} 도착 ${ta.arriveTime} → ${tb.arriveTime}${pk ? ` · 마중 ${U.hm(pk.waitAt)}` : ''}`;
   },
