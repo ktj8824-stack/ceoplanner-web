@@ -267,12 +267,20 @@ const Sec = {
     const el = document.getElementById('alerts'); if (!el) return;
     const now = new Date(), msgs = Store.messages(), all = Store.list();
     const rows = [];
+    const draftBtn = (s, min) => s.briefing && s.briefing.who ? `<button class="btn" data-latedraft="${s.id}" data-min="${min}">${Icon.svg('sms', 15)} ${U.esc(s.briefing.who.split(' ')[0])}님께 문자 초안</button>` : '';
     for (const s of Store.byDate(U.today())) {
       if (s.masked || s.status === 'cancelled') continue;
+      // 대표님이 앱에서 '늦어요'를 보냈으면 (60분 안) 맨 위 빨간 띠 + 늦어져서 다음 일정 이동이 모자라면 '…으로 미루기'
+      const ln = Learn.lateNotice(s, msgs, now, 60);
+      if (ln) {
+        rows.unshift(`<div class="alert-band late ceo">${Icon.svg('siren', 18)}<span><b>대표님: ${U.esc(s.title)} ${ln.min}분 늦음 · ${U.hm(ln.at)}</b><small>${U.hm(ln.arriveAt)}쯤 도착 · 시작 ${s.start}${s.location ? ' · ' + U.esc(s.location) : ''}</small>${this.lateNextHtml(s, ln.min)}</span>
+          ${draftBtn(s, ln.min)}</div>`);
+        continue;
+      }
       const e = Learn.eta(s, msgs, all);
       if (!e || e.late <= 0 || U.diffMin(now, U.at(s.date, s.start)) > 60) continue;
       rows.push(`<div class="alert-band late">${Icon.svg('alert', 18)}<span><b>'${U.esc(s.title)}' 약 ${e.late}분 늦을 것 같아요</b><small>출발 ${U.hm(e.depart)} · 도착 예상 ${U.hm(e.at)} · 시작 ${s.start}${e.learned ? ` · ${e.slotLabel || '지난 기록'} 평균 ${e.min}분` : ''}</small></span>
-        ${s.briefing && s.briefing.who ? `<button class="btn" data-latedraft="${s.id}" data-min="${e.late}">${Icon.svg('sms', 15)} ${U.esc(s.briefing.who.split(' ')[0])}님께 문자 초안</button>` : ''}</div>`);
+        ${draftBtn(s, e.late)}</div>`);
     }
     const t1 = U.addDays(U.today(), 1);
     const tomorrow = Store.byDate(t1).filter(s => s.status !== 'cancelled');
@@ -291,9 +299,21 @@ const Sec = {
     }
     el.innerHTML = rows.join('');
     el.querySelectorAll('[data-reinvite]').forEach(b => b.addEventListener('click', () => { const x = Store.get(b.dataset.reinvite); if (x) this.openInvite(x.id, { from: this.inviteStale(x) }); }));
+    el.querySelectorAll('[data-shift]').forEach(b => b.addEventListener('click', () => this.shiftSchedule(b.dataset.shift, b.dataset.to, b.dataset.clash)));
     el.querySelectorAll('[data-latedraft]').forEach(b => b.addEventListener('click', () => { const s = Store.get(b.dataset.latedraft); if (s) this.openDraft(s, Drafts.late(s, b.dataset.min, Store.profile())); }));
     el.querySelector('[data-briefnow]')?.addEventListener('click', () => this.openBrief(t1));
     el.querySelector('[data-briefskip]')?.addEventListener('click', () => { try { localStorage.setItem('CEOP_BRIEF_SKIP', t1); } catch { /* */ } this.renderAlerts(); });
+  },
+
+  /** 대표님이 늦어 이 일정이 늦게 끝나면 다음 일정까지 이동이 모자란지 — '다음: 12:20 투자사 점심 — 이동 50분 부족' + 미루기 */
+  lateNextHtml(s, min) {
+    const add = m => U.hm(U.addMin(U.at(s.date, m), min));
+    const late = { ...s, start: add(s.start), end: add(s.end || s.start) };
+    const w = Backtime.conflictsOn([...Store.list().filter(x => x.id !== s.id), late], s.date).find(x => x.a.id === s.id);
+    if (!w) return '';
+    const b = w.b.masked ? '개인 일정' : w.b.title;
+    const fix = w.b.masked ? null : this.fixFor(w);
+    return `<small class="late-next">다음: ${w.b.start} ${U.esc(b)} — 이동 ${w.shortMin}분 부족${fix ? ` <button class="btn sm signal" data-shift="${w.b.id}" data-to="${fix.to}"${fix.clash ? ` data-clash="${U.esc(fix.clash.masked ? '개인 일정' : fix.clash.title)}"` : ''}>${U.esc(w.b.title)} ${fix.to}${this.ro(fix.to)} 미루기</button>` : ''}</small>`;
   },
 
   // ───────── 오늘 현황 (모든 숫자는 오늘 기준) ─────────
@@ -551,7 +571,7 @@ const Sec = {
     back.innerHTML = `<div class="modal dispatch" role="dialog" aria-label="기사님께 배차 알림">
       <div class="ed-head"><div><h3>기사님께 배차 알림</h3><p class="muted small">${U.esc(p.driverName || '기사님')} · ${this.dateShort(ymd)} · 기사 차량 일정 ${plans.length}건${pks.length ? ` · 도착 마중 ${pks.length}건` : ''}</p></div>
         <button class="icon-btn" data-close aria-label="닫기">${Icon.svg('x', 18)}</button></div>
-      <div class="dp-body">${lines.length ? `<ol class="dp-list">${plans.map(({ s, p: pl }) => `<li><b class="num">${U.hm(pl.driverCallAt || pl.leaveAt)}</b><span>대기 · ${U.hm(pl.leaveAt)} 출발<small>${U.esc(s.trip ? (s.trip.station || '역') : (s.location || ''))} · ${s.start} ${U.esc(s.title)}</small></span></li>`).join('')}${pks.map(({ s, pk }) => `<li><b class="num">${U.hm(pk.waitAt)}</b><span>마중 대기 · ${U.esc(pkWhere(pk))}<small>${pk.flightNo ? U.esc(pk.flightNo) + ' ' : ''}${U.hm(pk.arriveAt)} 도착 · ${U.esc(s.title)}</small></span></li>`).join('')}</ol>
+      <div class="dp-body">${lines.length ? `<ol class="dp-list">${plans.map(({ s, p: pl }) => `<li><b class="num">${U.hm(pl.driverCallAt || pl.leaveAt)}</b><span>${U.esc(U.pickupLabel(this.originOf(s)) || '본사')} 대기 · ${U.hm(pl.leaveAt)} 출발<small>${U.esc(s.trip ? (s.trip.station || '역') : (s.location || ''))} · ${s.start} ${U.esc(s.title)}</small></span></li>`).join('')}${pks.map(({ s, pk }) => `<li><b class="num">${U.hm(pk.waitAt)}</b><span>마중 대기 · ${U.esc(pkWhere(pk))}<small>${pk.flightNo ? U.esc(pk.flightNo) + ' ' : ''}${U.hm(pk.arriveAt)} 도착 · ${U.esc(s.title)}</small></span></li>`).join('')}</ol>
         <label class="dp-text">보낼 문자<textarea id="dpText" rows="${lines.length + 3}">${U.esc(text)}</textarea></label>`
         : '<p class="muted">이 날은 기사 차량 일정이 없어요.</p>'}</div>
       <div class="ed-foot"><span style="flex:1" class="muted small">문자 속 링크로 기사님이 대기 · 출발 · 도착을 알려 줘요</span>
@@ -602,6 +622,7 @@ const Sec = {
           <label class="mv">여유 (분)<input name="bufferMin" type="number" min="0" max="120" value="${Number(s.bufferMin ?? 10)}"></label>
           <p class="hint">이동 시간은 지금은 직접 넣어요. 같은 길을 3번 넘게 다녀오면, 실제로 걸린 시간을 배워서 여기 알려 드려요.</p>
           <p class="learn-hint" id="learnHint"></p>
+          <p class="learn-hint late" id="lateHint" hidden></p>
         </fieldset>
         <datalist id="originList"></datalist>
         <fieldset class="full" id="tripBox"><legend>기차 · 비행기</legend>
@@ -651,12 +672,16 @@ const Sec = {
     f.elements.pickupBag && f.elements.pickupBag.addEventListener('input', e => { delete e.target.dataset.auto; });
     f.elements.accessMode && f.elements.accessMode.addEventListener('change', e => { if (e.isTrusted) delete e.target.dataset.auto; });
     f.addEventListener('input', () => { this.dirty = true; this.syncForm(f, back); });
+    // 출발지를 바꾸고 칸을 떠나면 이동 시간 칸으로 (이동 시간이 예전 출발지 기준일 수 있어요)
+    f.elements.origin.addEventListener('change', () => { if (this.originMoved(this.fromForm(f))) { f.elements.travelMin.focus(); f.elements.travelMin.select(); } });
     f.addEventListener('change', () => this.syncForm(f, back));
     f.addEventListener('submit', async e => { e.preventDefault(); if (await this.save(f)) { this.dirty = false; this.edit = null; back.remove(); } });
     // 배운 이동 시간 적용 · 추천 장소 고르기
     back.addEventListener('click', e => {
       const ap = e.target.closest('[data-applymin]');
       if (ap) { f.elements.travelMin.value = ap.dataset.applymin; this.dirty = true; this.syncForm(f, back); }
+      const lp = e.target.closest('[data-latepull]');
+      if (lp) { f.elements.travelMin.value = Number(f.elements.travelMin.value || 0) + Number(lp.dataset.latepull); f.dataset.latePulled = lp.dataset.latepull; this.dirty = true; this.syncForm(f, back); U.toast(`이동 시간을 ${lp.dataset.latepull}분 늘렸어요 — 출발이 그만큼 당겨져요`); }
       const pl = e.target.closest('[data-pickplace]');
       if (pl) { f.elements.location.value = pl.dataset.pickplace; this.dirty = true; this.syncForm(f, back); }
       // 도착이 늦어진 일정: 이 일정 시작 · 종료를 같은 길이로 미룸
@@ -771,10 +796,12 @@ const Sec = {
     const past = s.date && s.start && U.at(s.date, s.start) < new Date() && !(this.edit && this.edit.id) ? `<p class="pv-status">${Icon.svg('info', 15)} 이미 지난 시각이에요 — 기록용이면 그대로 저장하세요 (대표님 확인 대기에는 안 들어가요)</p>` : '';
     const prevS = this.prevFor(s.date, s.start, s.id);
     const gapNote = prevS && this.gapMin(prevS, s.start) > 180 && s.origin !== prevS.location ? `<p class="pv-status">${Icon.svg('info', 15)} 앞 일정(${U.esc(prevS.location)})이 ${U.esc(prevS.end || prevS.start)}에 끝나고 시간이 많이 비어요 — 출발지(${U.esc(s.origin || '본사')})가 맞는지 확인해 주세요</p>` : '';
+    const om = this.originMoved(s);
+    const originNote = om ? `<p class="pv-status warn">${Icon.svg('alert', 15)} 출발지가 바뀌었어요 — 이동 시간 ${Number(s.travelMin || 0)}분이 ${U.esc(this.originOf(s))} 기준인지 확인해 주세요</p>` : '';
     const overnight = s.end && s.end < s.start ? `<p class="pv-status">${Icon.svg('clock', 15)} 다음 날 ${s.end}에 끝나는 일정으로 저장돼요</p>` : '';
     // 새 일정을 막 열었을 때(아직 아무것도 안 고침)는 경고 대신 안내 — 처음 쓰는 분이 놀라지 않게
     const fresh = !(this.edit && this.edit.id) && !this.dirty;
-    const status = fresh ? `<p class="pv-status">${Icon.svg('info', 15)} 날짜 · 시간 · 장소를 정하면 앞뒤 일정과 겹치는지 바로 알려 드려요</p>` : past + gapNote + overnight + (warns.length ? warns.map(w => {
+    const status = fresh ? `<p class="pv-status">${Icon.svg('info', 15)} 날짜 · 시간 · 장소를 정하면 앞뒤 일정과 겹치는지 바로 알려 드려요</p>` : past + originNote + gapNote + overnight + (warns.length ? warns.map(w => {
         // 뒤 일정이 밀려 겹치면 그 일정을 '…으로 미루기' (당일 동선의 미루기와 같은 버튼)
         const nxt = w.a === s && w.b && !w.b.masked && w.b.id ? U.hm(U.addMin(U.at(w.b.date, w.b.start), ceil5(w.shortMin))) : '';
         const btn = w.self ? `<button type="button" class="btn sm signal" data-pvstart="${w.self}">시작 ${w.self}${this.ro(w.self)} 미루기</button>`
@@ -806,6 +833,14 @@ const Sec = {
       }
       const later = s.series && f.elements.applySeries && f.elements.applySeries.checked
         ? Store.list().filter(x => x.series === s.series && x.date > s.date && x.status !== 'cancelled') : [];
+      // 기사 차량 일정의 출발지(픽업 장소)가 바뀌면 기록 → 기사님 배차표 '픽업 장소 바뀜 · 예전: 자택', 대표 앱 '바뀜' (출발 전까지)
+      if (before && Backtime.driverLeg(s)) {
+        const from = this.originOf(before), to = this.originOf(s), pc = s.actual && s.actual.pickupChanged;
+        if (Learn.key(from) !== Learn.key(to)) {
+          const orig = pc && Learn.key(pc.from) !== Learn.key(to) ? pc.from : from;   // 여러 번 바꿔도 '예전'은 처음 장소
+          s.actual = { ...(s.actual || {}), pickupChanged: pc && Learn.key(pc.from) === Learn.key(to) ? null : { from: orig, at: new Date().toISOString() } };
+        }
+      }
       const same = ({ id, date, ackAt, nudgedAt, actual, createdBy, status, ...rest }) => rest;   // 날짜 · 확인 · 실제 기록은 그대로
       await Store.upsertMany([s, ...later.map(x => ({ ...x, ...same(s) }))]);
       U.toast(this.edit.id ? `저장했어요${later.length ? ` (이후 반복 ${later.length}건 함께)` : ''}. 대표님께 다시 확인을 요청했어요` : '등록했어요. 대표님 앱에 표시돼요');
@@ -841,6 +876,13 @@ const Sec = {
     if (!el) return this.chain(steps);
     const ob = new MutationObserver(() => { if (!el.isConnected) { ob.disconnect(); this.chain(steps); } });
     ob.observe(document.body, { childList: true });
+  },
+
+  /** 수정 중 출발지만 바뀌고 이동 시간은 그대로인지 (이동 시간이 예전 출발지 기준일 수 있어요) */
+  originMoved(s) {
+    const o = this.edit && this.edit.id ? Store.get(this.edit.id) : null;
+    if (!o || !s || s.mode === 'none' || Backtime.isTrip(s.mode)) return false;
+    return Learn.key(this.originOf(o)) !== Learn.key(this.originOf(s)) && Number(s.travelMin || 0) === Number(o.travelMin || 0);
   },
 
   /** 출발지 칸이 비면 화면처럼 앞 일정 장소(없으면 본사) */
@@ -882,6 +924,15 @@ const Sec = {
       const html = t ? `${Icon.svg('clock', 14)} <span>${t.slotLabel ? `${t.slotLabel}에 ` : ''}지난 ${t.n}번 실제로 <b>평균 ${t.avg}분</b> 걸렸어요 <small>(${t.mins.join(' · ')}분${t.sameOrigin ? ` · ${U.esc(s.origin)}에서` : ''})</small></span>${Number(s.travelMin) !== t.avg ? ` <button type="button" class="btn sm" data-applymin="${t.avg}">${t.avg}분으로</button>` : ''}` : '';
       if (hint._html !== html) { hint.innerHTML = html; hint._html = html; }   // 같은 내용이면 다시 그리지 않음 (누르는 중인 버튼이 사라지지 않게)
       hint.hidden = !t;
+    }
+    const lh = back.querySelector('#lateHint');
+    if (lh) {
+      // 같은 길 · 같은 시간대에 대표님이 2번 넘게 '늦어요'를 보냈으면 출발을 당기자고 권해요
+      const hb = s.mode !== 'none' && !Backtime.isTrip(s.mode) && s.location ? Learn.lateHabit(Store.list(), { origin: this.originOf(s), location: s.location, date: s.date, start: s.start }) : null;
+      const pulled = Number(f.dataset.latePulled || 0);
+      const html = hb ? `${Icon.svg('alert', 14)} <span>${hb.slotLabel}에 이 길로 지난 ${hb.n}번 평균 <b>${hb.avg}분 늦음</b> — ${pulled ? `출발을 ${pulled}분 당겼어요 (이동 ${Number(s.travelMin || 0)}분)` : `출발 ${hb.pullMin}분 당길까요?`}</span>${pulled ? '' : ` <button type="button" class="btn sm" data-latepull="${hb.pullMin}">출발 ${hb.pullMin}분 당기기</button>`}` : '';
+      if (lh._html !== html) { lh.innerHTML = html; lh._html = html; }
+      lh.hidden = !hb;
     }
     const rec = back.querySelector('#placeRec');
     if (rec) {
