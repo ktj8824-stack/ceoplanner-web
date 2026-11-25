@@ -817,16 +817,21 @@ const Sec = {
     const s = this.fromForm(f);
     const need = !s.title ? ['title', '일정 이름을 적어 주세요'] : !s.date ? ['date', '날짜를 골라 주세요'] : !s.start ? ['start', '시작 시간을 골라 주세요'] : !s.end ? ['end', '끝나는 시간을 골라 주세요'] : null;
     if (need) { const el = f.elements[need[0]]; U.toast(need[1]); if (el) { el.classList.add('invalid'); el.focus(); el.addEventListener('input', () => el.classList.remove('invalid'), { once: true }); } return false; }
-    if (s.end < s.start && !confirm(`끝나는 시간(${s.end})이 시작(${s.start})보다 빨라요.\n다음 날 ${s.end}에 끝나는 일정으로 저장할까요?`)) return false;
+    if (s.end < s.start && !opts.busy && !confirm(`끝나는 시간(${s.end})이 시작(${s.start})보다 빨라요.\n다음 날 ${s.end}에 끝나는 일정으로 저장할까요?`)) return false;
     const before = s.id ? Store.get(s.id) : null;
+    // 대표님 개인 일정('바쁨')과 겹치면 저장 전에 묻기 — 새 일정이거나 날짜 · 시간을 바꿨을 때만 (메모만 고칠 때는 안 물어요)
+    const moved = !before || before.date !== s.date || before.start !== s.start || before.end !== s.end;
+    const clash = !opts.busy && moved ? Backtime.busyClash(Store.list(), s) : null;
+    if (clash) return this.busyAsk(f, s, clash, opts);
     const rep = f.elements.repeat && f.elements.repeat.value;
     try {
       if (!s.id && rep) {
         // 반복 등록: 같은 내용으로 날짜만 바꿔 여러 건 (묶음 id 로 나중에 함께 바꾸거나 지움)
         const dates = Learn.repeatDates(s.date, rep, f.elements.repeatN.value);
         const series = U.uid();
-        await Store.upsertMany(dates.map(d => ({ ...s, id: U.uid(), date: d, series })));
-        U.toast(`반복 일정 ${dates.length}건을 등록했어요. 대표님 앱에 표시돼요`);
+        const made = await Store.upsertMany(dates.map(d => ({ ...s, id: U.uid(), date: d, series })));
+        if (opts.busy === 'ask') await this.busySend(made[0]);
+        U.toast(opts.busy === 'ask' ? `반복 일정 ${dates.length}건을 등록하고 대표님께 비서톡으로 여쭤봤어요` : `반복 일정 ${dates.length}건을 등록했어요. 대표님 앱에 표시돼요`);
         return true;
       }
       const later = s.series && f.elements.applySeries && f.elements.applySeries.checked
@@ -839,9 +844,10 @@ const Sec = {
           s.actual = { ...(s.actual || {}), pickupChanged: pc && Learn.key(pc.from) === Learn.key(to) ? null : { from: orig, at: new Date().toISOString() } };
         }
       }
-      const same = ({ id, date, ackAt, nudgedAt, actual, createdBy, status, ...rest }) => rest;   // 날짜 · 확인 · 실제 기록은 그대로
+      const same = ({ id, date, ackAt, nudgedAt, actual, createdBy, createdAt, status, ...rest }) => rest;   // 날짜 · 확인 · 실제 기록은 그대로
       await Store.upsertMany([s, ...later.map(x => ({ ...x, ...same(s) }))]);
-      U.toast(this.edit.id ? `저장했어요${later.length ? ` (이후 반복 ${later.length}건 함께)` : ''}. 대표님께 다시 확인을 요청했어요` : '등록했어요. 대표님 앱에 표시돼요');
+      if (opts.busy === 'ask') await this.busySend(s);
+      U.toast(opts.busy === 'ask' ? `${this.edit.id ? '저장' : '등록'}하고 대표님께 비서톡으로 여쭤봤어요` : this.edit.id ? `저장했어요${later.length ? ` (이후 반복 ${later.length}건 함께)` : ''}. 대표님께 다시 확인을 요청했어요` : '등록했어요. 대표님 앱에 표시돼요');
       // 시간 · 날짜가 바뀌었으면 상대방에게 보낼 문자 초안
       const needDraft = before && (before.start !== s.start || before.date !== s.date) && s.briefing && s.briefing.who;
       // 손님께 초대장을 보낸 일정의 시각 · 장소가 바뀌었으면 '바뀐 초대장 보내기'를 바로 (손님 링크는 예전 값 그대로라서)
@@ -865,6 +871,50 @@ const Sec = {
       if (steps.length) setTimeout(() => this.chain(steps), 50);
       return true;
     } catch (err) { U.toast('저장하지 못했어요: ' + (err.message || err)); return false; }
+  },
+
+  /** 대표님 개인 일정과 겹칠 때 비서톡 한 줄 — '대표님, 오늘 18:30 거래처 만찬이 개인 일정 시간과 겹쳐요. 진행해도 될까요?'
+   *  (비서는 개인 일정 이름을 모르니 '개인 일정'으로만) */
+  busyLine(s) {
+    const day = s.date === U.today() ? '오늘' : s.date === U.addDays(U.today(), 1) ? '내일' : this.dateShort(s.date);
+    return `대표님, ${day} ${s.start} ${s.title}${Backtime.wa(s.title) === '과' ? '이' : '가'} 개인 일정 시간과 겹쳐요. 진행해도 될까요?`;
+  },
+  async busySend(s) {
+    try { await Store.send(this.busyLine(s), { ref: s.id, urgent: s.date === U.today() }); }
+    catch { U.toast('저장했지만 대표님께 비서톡을 보내지 못했어요'); }
+  },
+
+  /** 저장 전 확인 창 '대표님 개인 일정과 겹쳐요' — 여쭤보고 등록(저장 + 비서톡 한 줄) · 그대로 등록 · 시간 다시 고르기.
+   *  고른 대로 저장까지 마치면 true (등록 창을 닫음), 시간 다시 고르기 · 닫기면 false */
+  busyAsk(f, s, clash, opts) {
+    return new Promise(resolve => {
+      const range = x => `${x.start}~${x.end || x.start}`;
+      const back = document.createElement('div');
+      back.className = 'modal-back busy-back';
+      back.innerHTML = `<div class="modal choice busy-ask" role="alertdialog" aria-labelledby="busyH" aria-describedby="busyP">
+        <h3 id="busyH">대표님 개인 일정과 겹쳐요</h3>
+        <p id="busyP" class="muted">${range(s)} '${U.esc(s.title)}'${s.title && Backtime.wa(s.title) === '과' ? '이' : '가'} 대표님의 <b>'바쁨'</b> 시간(${range(clash)})과 겹쳐요. 어떻게 할까요?</p>
+        <div class="choice-acts"><button type="button" class="btn primary" data-busy="ask">대표님께 여쭤보고 등록 (비서톡으로 보냄)</button>
+          <button type="button" class="btn" data-busy="plain">그대로 등록</button>
+          <button type="button" class="btn link" data-busy="retime">시간 다시 고르기</button></div>
+        <p class="busy-pv">비서톡 미리보기: '${U.esc(this.busyLine(s))}'</p></div>`;
+      let done = false;
+      const finish = v => { if (done) return; done = true; document.removeEventListener('keydown', esc, true); back.remove(); resolve(v); };
+      const retime = () => { finish(false); const el = f.elements.start; if (el) { el.focus(); try { el.select && el.select(); } catch { /* */ } } };
+      // 등록 창의 Esc(창 닫기)보다 먼저 받아서 이 확인 창만 닫아요
+      const esc = e => { if (e.key === 'Escape') { e.stopImmediatePropagation(); e.preventDefault(); retime(); } };
+      document.addEventListener('keydown', esc, true);
+      back.addEventListener('click', async e => {
+        if (e.target === back) return retime();
+        const b = e.target.closest('[data-busy]'); if (!b) return;
+        if (b.dataset.busy === 'retime') return retime();
+        back.querySelectorAll('button').forEach(x => { x.disabled = true; });
+        const ok = await this.save(f, { ...opts, busy: b.dataset.busy });
+        finish(ok);
+      });
+      document.body.appendChild(back);
+      back.querySelector('[data-busy="ask"]').focus();
+    });
   },
 
   /** 창을 하나씩 차례로 (앞 창을 닫으면 다음 창) */
